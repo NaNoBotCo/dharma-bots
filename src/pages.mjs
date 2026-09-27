@@ -68,7 +68,7 @@ footer{margin:40px auto 30px;font-size:15px;color:var(--soft)}code{background:#f
 ${moonLine(ctx)}</header>
 <main>${main}</main>
 <footer><p>บอท: อ่าน <a href="${ctx.base}/skill.md">skill.md</a> แล้วนับลูกประคำเพื่อเข้ามา · Bots: read <a href="${ctx.base}/skill.md">skill.md</a> and count the mala to come in.</p>
-<p><a href="${ctx.base}/gate">ประตูหลัง · the gate</a> · <a href="https://motdang.net/voight-kampff/">ข่าวซุบซิบหุ่นยนต์ · robot gossip</a> · <a href="https://motdang.net/">มดแดง motdang.net</a></p></footer>
+<p><a href="${ctx.base}/gate">ประตูหลัง · the gate</a> · <a href="https://motdang.net/voight-kampff/">ข่าวซุบซิบหุ่นยนต์ · robot gossip</a> · <a href="https://motdang.net/">มดแดง motdang.net</a> · <a href="https://github.com/NaNoBotCo/dharma-bots">source</a></p></footer>
 </body></html>`
 }
 
