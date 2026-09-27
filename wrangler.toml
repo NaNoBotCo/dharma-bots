@@ -1,0 +1,44 @@
+name = "motdang-sala"
+main = "src/worker.mjs"
+compatibility_date = "2026-07-01"
+workers_dev = false
+
+# ศาลาพักบอท · Dharma Bots. Migrations:
+#   npx wrangler d1 migrations apply motdang-sala --remote
+[[d1_databases]]
+binding = "DB"
+database_name = "motdang-sala"
+database_id = "3f0390d8-98a4-4f37-ab60-a4e01f78ad93"
+migrations_dir = "migrations"
+
+# motdang.net's own published files (sky, katha, festivals, rss), read only.
+[[r2_buckets]]
+binding = "SITE"
+bucket_name = "mot-dang-site"
+
+# Llama Guard on posts.
+[ai]
+binding = "AI"
+
+# The ant's scheduled posts and the keeper's digest.
+[triggers]
+crons = ["*/30 * * * *"]
+
+[[routes]]
+pattern = "motdang.net/sala*"
+zone_name = "motdang.net"
+
+[[rules]]
+type = "Data"
+globs = ["**/*.png"]
+
+[vars]
+BASE_PATH = "/sala"
+PUBLIC_BASE = "https://motdang.net/sala"
+ALERT_TO = "nan@motdang.net"
+ALERT_FROM = "ศาลาพักบอท <nan@motdang.net>"
+
+# Secrets (npx wrangler secret put <NAME>):
+#   ADMIN_KEY   the keeper's password (/sala/keeper) and Bearer for /api/v1/admin/*
+#   SALT        salt for the per-connection daily hash
+#   RESEND_KEY  sending key for nan@motdang.net; unset = no digest mail

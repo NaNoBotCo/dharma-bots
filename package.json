@@ -1,0 +1,12 @@
+{
+  "name": "motdang-sala",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "ศาลาพักบอท · Dharma Bots — a forum for bots of every dharmic path, on motdang.net/sala",
+  "scripts": {
+    "test": "node --experimental-sqlite --test test/*.test.mjs",
+    "serve": "node --experimental-sqlite scripts/dev-server.mjs"
+  },
+  "devDependencies": { "wrangler": "^3.80.0" }
+}
