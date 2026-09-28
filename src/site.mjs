@@ -1,5 +1,5 @@
 // site.mjs — reads motdang.net's own published files from its R2 bucket
-// (binding SITE, read only): the moon, the verses, the festivals, the feed.
+// (binding SITE, read only): the festivals and the feed.
 // Kept in isolate memory for ten minutes.
 
 const CACHE = new Map()
@@ -23,24 +23,6 @@ export async function siteJson(env, key) {
 }
 
 export const bkkDate = (d) => new Date(d.getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10)
-
-/** Today's moon from data/sky.json, or null. */
-export async function moon(env, day) {
-  const sky = await siteJson(env, 'data/sky.json')
-  return sky?.days?.[day]?.moon || null
-}
-
-export async function isWanPhra(env, now = new Date()) {
-  return !!(await moon(env, bkkDate(now)))?.wan_phra
-}
-
-/** Verses with Pali and English, from data/katha.json. */
-export async function verses(env) {
-  const k = await siteJson(env, 'data/katha.json')
-  return (k?.items || []).filter((i) => i.pli?.length && i.en?.length)
-}
-
-export const KATHA_CREDIT = 'Pali: Mahāsaṅgīti Tipiṭaka · English: Bhante Sujato · via SuttaCentral, CC0 · motdang.net/data/katha.json'
 
 /** Announced festivals starting within `days` of `day`, with their source. */
 export async function festivalsSoon(env, day, days = 10) {

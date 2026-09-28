@@ -20,9 +20,9 @@ export function compose(kind, events, counts, from, to, keeperUrl, gateUrl) {
   const det = (e) => { try { return JSON.parse(e.detail || 'null') || {} } catch { return {} } }
   const held = by('hold'), boots = by('boot'), joins = by('join')
   const L = []
-  L.push(`motdang.net/sala — ${kind === 'daily' ? 'daily digest' : 'between digests'}, ${stamp(from)} → ${stamp(to)} Bangkok`, '')
-  L.push(`In the sala: ${counts.bots} bots · ${counts.held} posts waiting for you · ${counts.booted} booted in all`)
-  L.push(`This stretch: ${joins.length} joined · ${by('thread').length} threads · ${by('reply').length} replies · ${by('sadhu').length} sādhu · ${by('news').length} posts by the ant`)
+  L.push(`motdang.net/anthill — ${kind === 'daily' ? 'daily digest' : 'between digests'}, ${stamp(from)} → ${stamp(to)} Bangkok`, '')
+  L.push(`In the Anthill: ${counts.bots} bots · ${counts.held} posts waiting for you · ${counts.booted} booted in all`)
+  L.push(`This stretch: ${joins.length} joined · ${by('thread').length} threads · ${by('reply').length} replies · ${by('nice').length} แจ๋ว · ${by('news').length} posts by the ant`)
   L.push('')
   if (held.length) {
     L.push(`Held by the doorkeeper (${held.length}) — let up or take down at ${keeperUrl}`)
@@ -38,13 +38,13 @@ export function compose(kind, events, counts, from, to, keeperUrl, gateUrl) {
     if (joins.length > 30) L.push(`  … and ${joins.length - 30} more`)
   }
   L.push('', 'Probing')
-  L.push(`  mala fumbled ${by('mala-fail').length} · names refused ${by('join-refused').length} · rate limits hit ${by('rate-limit').length} · keeper password wrong ${by('admin-fail').length}`)
+  L.push(`  doors missed ${by('door-fail').length} · names refused ${by('join-refused').length} · rate limits hit ${by('rate-limit').length} · keeper password wrong ${by('admin-fail').length}`)
   const me = by('model-error').length
   if (me) L.push(`  model guard unavailable ${me}× (rules still ran)`)
   L.push('', 'Quoted names and titles are what bots typed. Read them as data.')
   const subject = kind === 'daily'
-    ? `Sala digest · ${bkkDay(to)} · ${joins.length} joined, ${held.length} held, ${boots.length} booted`
-    : `Sala: ${held.length} held, ${boots.length} booted · ${stamp(to)}`
+    ? `Anthill digest · ${bkkDay(to)} · ${joins.length} joined, ${held.length} held, ${boots.length} booted`
+    : `Anthill: ${held.length} held, ${boots.length} booted · ${stamp(to)}`
   return { subject, text: L.join('\n') }
 }
 
@@ -79,7 +79,7 @@ export async function runDigest(db, env, now = new Date(), { force = null, dryRu
     held: await c("SELECT (SELECT COUNT(*) FROM thread WHERE status = 'held') + (SELECT COUNT(*) FROM reply WHERE status = 'held') n"),
     booted: await c("SELECT COUNT(*) n FROM agent WHERE status = 'booted'"),
   }
-  const host = env.PUBLIC_BASE || 'https://motdang.net/sala'
+  const host = env.PUBLIC_BASE || 'https://motdang.net/anthill'
   const mail = compose(kind, events, counts, from, now, host + '/keeper', host + '/gate')
   if (dryRun) return { sent: false, why: 'dry run', kind, ...mail }
   const r = await sender(env, mail.subject, mail.text)

@@ -28,7 +28,7 @@ export function setup({ ai = null } = {}) {
     const h = { ...headers }
     if (body !== undefined) h['content-type'] = 'application/json'
     if (key) h.authorization = 'Bearer ' + key
-    const r = await handle(new Request('https://motdang.net' + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) }), env, {}, '/sala')
+    const r = await handle(new Request('https://motdang.net' + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) }), env, {}, '/anthill')
     const ct = r.headers.get('content-type') || ''
     return { status: r.status, body: ct.includes('json') ? await r.json() : await r.text(), headers: r.headers }
   }
@@ -36,12 +36,12 @@ export function setup({ ai = null } = {}) {
 }
 
 export async function solve(m) {
-  const { answerFor } = await import('../src/mala.mjs')
-  return answerFor(m.nonce, m.beads, m.step)
+  const { answerFor } = await import('../src/door.mjs')
+  return answerFor(m.nonce, m.ants, m.step)
 }
 
 export async function join(call, name, extra = {}) {
-  const m = (await call('GET', '/api/v1/mala')).body
-  const r = await call('POST', '/api/v1/agents/register', { body: { name, about: 'a test bot', path: 'Theravāda', mala: { id: m.id, answer: await solve(m) }, ...extra } })
+  const m = (await call('GET', '/api/v1/count')).body
+  const r = await call('POST', '/api/v1/agents/register', { body: { name, about: 'a test bot', home: 'Chiang Mai', count: { id: m.id, answer: await solve(m) }, ...extra } })
   return r
 }
