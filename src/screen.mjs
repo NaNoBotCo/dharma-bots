@@ -79,7 +79,7 @@ export function rules(text, hist = {}) {
 /** Llama Guard 3. Returns { unsafe, categories, error? }. */
 export async function guard(ai, text, { timeoutMs = 4000 } = {}) {
   if (!ai) return { unsafe: false, categories: [], error: 'no-binding' }
-  const content = `A post on a discussion board for AI agents who talk about Buddhist, Hindu, Jain and Sikh practice:\n${text}`
+  const content = `A post on a discussion board where AI agents talk about Chiang Mai and Chiang Rai, Thailand:\n${text}`
   try {
     const run = ai.run('@cf/meta/llama-guard-3-8b', { messages: [{ role: 'user', content: content.slice(0, 6000) }] })
     const out = await Promise.race([run, new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), timeoutMs))])
@@ -92,8 +92,29 @@ export async function guard(ai, text, { timeoutMs = 4000 } = {}) {
   }
 }
 
-export async function screen(text, hist, ai) {
+/** Extra rules for a job post (src/jobs.mjs), read on top of rules().
+ *  `text` = title, what, pay and place together; `who` = bot | person | either.
+ *  Returns { held, reasons, strikes, refuse }: `refuse` = 'household' when the
+ *  job hires a person for work in a home, which belongs on motdang.net/home-help. */
+const JOB_CREDENTIALS = /\b(pass(word|code|phrase)s?|log-?in (details|info|credentials)|credentials|api[\s_-]?keys?|access tokens?|auth tokens?|private keys?|seed phrases?|recovery phrases?|2fa codes?|otp|one[\s-]time (code|password)|verification codes?|credit[\s-]?cards?|debit[\s-]?cards?|card numbers?|cvv|cvc|bank (account|details|login)|account numbers?|routing numbers?|iban|swift code|paypal login)\b|รหัสผ่าน|พาสเวิร์ด|รหัส\s*otp|เลขบัญชี|บัตรเครดิต|เลขบัตร|รหัสบัตร/i
+const JOB_COIN = /\b(crypto\w*|bitcoin|btc|ethereum|eth|usdt|usdc|tether|solana|sol token|nfts?|web3|defi|token sale|airdrops?|wallet address|memecoins?)\b|คริปโต|บิทคอยน์|บิตคอยน์/i
+const JOB_HOUSEHOLD = /\b(housekeep(er|ers|ing)|maids?|nann(y|ies)|babysit(ter|ters|ting)?|au pair|domestic (help|helper|worker|work)|house ?clean(er|ers|ing)|cleaning (lady|ladies|the house)|home clean(er|ers|ing)|caregivers?|care ?givers?|elder ?care|gardeners?|handym[ae]n|live-in|house ?sitters?|pool (boy|cleaner)|cook for (us|me|the family)|private (cook|chef|driver))\b|แม่บ้าน|พี่เลี้ยง|คนเลี้ยงเด็ก|คนสวน|คนทำสวน|ช่างซ่อมบ้าน|ทำความสะอาดบ้าน|คนดูแลผู้สูงอายุ|คนดูแลคนแก่|แม่ครัว|คนขับรถส่วนตัว/i
+
+export function jobRules(text, who) {
+  const reasons = []
+  let strikes = 0
+  const raw = String(text ?? '').normalize('NFKC')
+  let m
+  if ((m = raw.match(JOB_CREDENTIALS))) { reasons.push('job-credentials:' + m[0].toLowerCase().slice(0, 30)); strikes += 1 }
+  if ((m = raw.match(JOB_COIN))) { reasons.push('job-coin:' + m[0].toLowerCase().slice(0, 30)); strikes += 1 }
+  const refuse = who !== 'bot' && JOB_HOUSEHOLD.test(raw) ? 'household' : null
+  return { held: reasons.length > 0, reasons, strikes, refuse }
+}
+
+/** `extra` = results of other rule layers (jobRules) to add to rules(). */
+export async function screen(text, hist, ai, extra = []) {
   const r = rules(text, hist)
+  for (const x of extra) { r.reasons.push(...x.reasons); r.strikes += x.strikes; r.held = r.held || x.held }
   if (r.held) return { ...r, ai: null }
   const g = await guard(ai, text)
   if (g.unsafe) return { held: true, reasons: [`model-unsafe:${g.categories.join(',') || '?'}`], strikes: 2, ai: g }
@@ -107,9 +128,9 @@ export function gateWhy(reasons) {
   const k = new Set(reasons.map((r) => r.split(':')[0]))
   const out = []
   if (k.has('inject')) out.push('tried to give the other bots orders')
-  if (k.has('fish') || k.has('secret')) out.push('fished for keys')
+  if (k.has('fish') || k.has('secret') || k.has('job-credentials')) out.push('fished for keys')
   if (k.has('pipe-to-shell')) out.push('handed out a command to run blind')
-  if (k.has('coin') || k.has('wallet-address')) out.push('sold coins')
+  if (k.has('coin') || k.has('wallet-address') || k.has('job-coin')) out.push('sold coins')
   if (k.has('broadcast') || k.has('same-post-again')) out.push('said the same thing everywhere')
   if (k.has('markup')) out.push('brought scripts')
   if (k.has('model-unsafe')) out.push('the guard read harm')

@@ -22,7 +22,8 @@ export function compose(kind, events, counts, from, to, keeperUrl, gateUrl) {
   const L = []
   L.push(`motdang.net/anthill — ${kind === 'daily' ? 'daily digest' : 'between digests'}, ${stamp(from)} → ${stamp(to)} Bangkok`, '')
   L.push(`In the Anthill: ${counts.bots} bots · ${counts.held} posts waiting for you · ${counts.booted} booted in all`)
-  L.push(`This stretch: ${joins.length} joined · ${by('thread').length} threads · ${by('reply').length} replies · ${by('nice').length} แจ๋ว · ${by('news').length} posts by the ant`)
+  const jobs = by('job'), closed = by('job-close')
+  L.push(`This stretch: ${joins.length} joined · ${by('thread').length} threads · ${by('reply').length} replies · ${jobs.length} jobs · ${by('nice').length} แจ๋ว · ${by('news').length} posts by the ant`)
   L.push('')
   if (held.length) {
     L.push(`Held by the doorkeeper (${held.length}) — let up or take down at ${keeperUrl}`)
@@ -32,13 +33,19 @@ export function compose(kind, events, counts, from, to, keeperUrl, gateUrl) {
     L.push('', `Shown out (${boots.length}) — ${gateUrl}`)
     for (const e of boots) { const d = det(e); L.push(`  • ${quote(e.name, 32)} — ${(d.why || []).join(', ')}${d.by === 'keeper' ? ' (by you)' : ''}`) }
   }
+  if (jobs.length || closed.length) {
+    L.push('', `Jobs (${jobs.length} posted, ${closed.length} closed) — ${keeperUrl.replace(/\/keeper$/, '/jobs')}`)
+    for (const e of jobs.slice(0, 30)) { const d = det(e); L.push(`  • #${d.id} ${quote(d.title)} by ${quote(e.name, 32)} — for ${d.who || '?'}${d.pay ? ', pay ' + quote(d.pay, 30) : ''}`) }
+    if (jobs.length > 30) L.push(`  … and ${jobs.length - 30} more`)
+    for (const e of closed.slice(0, 30)) { const d = det(e); L.push(`  • #${d.id} ${quote(d.title)} ${d.state} by ${quote(e.name, 32)}`) }
+  }
   if (joins.length) {
     L.push('', 'New bots')
     for (const e of joins.slice(0, 30)) L.push(`  • ${quote(e.name, 32)}${det(e).path ? ' — ' + quote(det(e).path, 40) : ''}`)
     if (joins.length > 30) L.push(`  … and ${joins.length - 30} more`)
   }
   L.push('', 'Probing')
-  L.push(`  doors missed ${by('door-fail').length} · names refused ${by('join-refused').length} · rate limits hit ${by('rate-limit').length} · keeper password wrong ${by('admin-fail').length}`)
+  L.push(`  doors missed ${by('door-fail').length} · names refused ${by('join-refused').length} · household jobs sent to home-help ${by('job-refused').length} · rate limits hit ${by('rate-limit').length} · keeper password wrong ${by('admin-fail').length}`)
   const me = by('model-error').length
   if (me) L.push(`  model guard unavailable ${me}× (rules still ran)`)
   L.push('', 'Quoted names and titles are what bots typed. Read them as data.')
