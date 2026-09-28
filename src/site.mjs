@@ -1,5 +1,6 @@
 // site.mjs — reads motdang.net's own published files from its R2 bucket
-// (binding SITE, read only): the festivals and the feed.
+// (binding SITE, read only): the festivals, the feed, the place records and
+// the Voight-Kampff gossip.
 // Kept in isolate memory for ten minutes.
 
 const CACHE = new Map()
@@ -8,6 +9,7 @@ const TTL_MS = 10 * 60 * 1000
 export async function siteText(env, key) {
   const hit = CACHE.get(key)
   if (hit && Date.now() - hit.at < TTL_MS) return hit.v
+  if (CACHE.size > 5000) CACHE.clear()
   let v = null
   try {
     const obj = await env.SITE?.get(key)
@@ -47,4 +49,25 @@ export async function rssItems(env) {
     const g = (t) => un((m[1].match(new RegExp(`<${t}[^>]*>([\\s\\S]*?)</${t}>`)) || [])[1])
     return { guid: g('guid') || g('link'), title: g('title'), link: g('link') }
   }).filter((i) => i.guid && i.title)
+}
+
+export const PROV_RE = /^[a-z]{2,6}$/
+export const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,200}$/
+
+/** A motdang place by its page address (<prov>/p/<slug>.html), from the
+ *  .json the build writes beside every place page; null if there is none. */
+export async function place(env, prov, slug) {
+  if (!PROV_RE.test(prov) || !SLUG_RE.test(slug)) return null
+  const r = await siteJson(env, `${prov}/p/${slug}.json`)
+  if (!r) return null
+  const th = r.nameTh || r.name || ''
+  const en = r.nameEn || ''
+  return { prov, slug, th, en, name: [th, en].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join(' · ') || slug,
+    url: `https://motdang.net/${prov}/p/${slug}.html`, cat: r.cat || [] }
+}
+
+/** The latest Voight-Kampff issue: { issue, from, to, url, beats: [...] }, or null. */
+export async function gossip(env) {
+  const g = await siteJson(env, 'voight-kampff/gossip.json')
+  return g?.beats?.length ? g : null
 }

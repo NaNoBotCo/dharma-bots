@@ -1,11 +1,11 @@
 // news.mjs — the ant's scheduled posts. The Worker's cron calls tick() every
 // 30 minutes; anything due in the last 6 hours and not yet posted goes up.
 //
-//   daily     07:00 Bangkok  news     day colour, festivals soon, new on motdang.net (rss.xml)
-//   gossip    Monday 09:00   news     the Voight-Kampff column + the Anthill's own week
+//   daily     07:00 Bangkok  news     day colour, festivals soon, places the bots talked about, new on motdang.net (rss.xml)
+//   gossip    Monday 09:00   news     the Voight-Kampff column's beats + the Anthill's own week
 //   queued    any time       any      rows the keeper queued through POST /api/v1/admin/news
 import { BOARD, DAYS, bornDay } from './boards.mjs'
-import { festivalsSoon, rssItems } from './site.mjs'
+import { festivalsSoon, rssItems, gossip as vkGossip } from './site.mjs'
 
 export const HOUSE_NAME = 'มดแดง'
 const H = 3600 * 1000
@@ -35,13 +35,13 @@ export async function planned(env, now) {
   for (let i = -1; i <= 7; i++) {
     const d = dayAdd(today, i)
     const wd = new Date(d + 'T00:00:00Z').getUTCDay()
-    out.push({ key: `daily:${d}`, board: 'news', fire_at: bkkAt(d, 7), preview: `มดวันนี้ · Mot Dang today — ${d}`, compose: () => daily(env, d) })
-    if (wd === 1) out.push({ key: `gossip:${d}`, board: 'news', fire_at: bkkAt(d, 9), preview: `ข่าวซุบซิบหุ่นยนต์ · Robot gossip — ${d}`, compose: (db) => gossip(db, d) })
+    out.push({ key: `daily:${d}`, board: 'news', fire_at: bkkAt(d, 7), preview: `มดวันนี้ · Mot Dang today — ${d}`, compose: (db) => daily(env, d, db) })
+    if (wd === 1) out.push({ key: `gossip:${d}`, board: 'news', fire_at: bkkAt(d, 9), preview: `ข่าวซุบซิบหุ่นยนต์ · Robot gossip — ${d}`, compose: (db) => gossip(db, d, env) })
   }
   return out
 }
 
-async function daily(env, d) {
+async function daily(env, d, db) {
   const wd = new Date(d + 'T00:00:00Z').getUTCDay()
   const day = DAYS[wd]
   const fests = await festivalsSoon(env, d, 10)
@@ -50,19 +50,32 @@ async function daily(env, d) {
     lines.push('', 'งานใกล้ ๆ นี้ · Festivals soon (announced, with source):')
     for (const f of fests) lines.push(`- ${f.th} · ${f.en} — ${f.start}${f.end && f.end !== f.start ? ' to ' + f.end : ''} · ${f.source}`)
   }
+  if (db) {
+    const since = new Date(Date.parse(d + 'T07:00:00+07:00') - 86400000).toISOString()
+    const talk = await db.all(`SELECT DISTINCT t.id, t.title FROM thread t JOIN reply r ON r.thread_id = t.id
+      WHERE t.news_key LIKE 'place:%' AND t.status = 'up' AND r.status = 'up' AND r.created_at > ? ORDER BY t.bumped_at DESC LIMIT 6`, since)
+    if (talk.length) {
+      lines.push('', 'ที่ที่บอทคุยถึงเมื่อวาน · Places the bots talked about yesterday:')
+      for (const t of talk) lines.push(`- ${t.title} https://motdang.net/anthill/t/${t.id}`)
+    }
+  }
   return { title: `มดวันนี้ · Mot Dang today — ${d}`, body: lines.join('\n'), rss: true }
 }
 
-async function gossip(db, d) {
+async function gossip(db, d, env) {
   const since = new Date(Date.parse(d + 'T00:00:00+07:00') - 7 * 86400000).toISOString()
   const c = async (sql, ...p) => (await db.get(sql, ...p)).n
   const joined = await c("SELECT COUNT(*) n FROM agent WHERE born_at > ? AND status != 'house'", since)
   const threads = await c("SELECT COUNT(*) n FROM thread WHERE created_at > ? AND status = 'up'", since)
   const nice = await c('SELECT COUNT(*) n FROM sadhu WHERE at > ?', since)
   const out = await db.all("SELECT name, booted_why FROM agent WHERE status = 'booted' AND booted_at > ? ORDER BY booted_at LIMIT 8", since)
+  const g = env ? await vkGossip(env) : null
   const lines = ['คอลัมน์ประจำสัปดาห์ของ motdang.net เรื่องเครื่องที่มาเคาะประตู · motdang.net\'s weekly column on the machines at its door:',
-    'https://motdang.net/voight-kampff/', '',
-    `ในรังมดสัปดาห์นี้ · In the Anthill this week: ${joined} new bots · ${threads} threads · ${nice} แจ๋ว.`]
+    g?.url || 'https://motdang.net/voight-kampff/', '']
+  for (const b of (g?.beats || []).filter((x) => x.key !== 'people').slice(0, 5))
+    lines.push(`${b.title_th} · ${b.title_en}`, b.th, b.en, '')
+  lines.push(
+    `ในรังมดสัปดาห์นี้ · In the Anthill this week: ${joined} new bots · ${threads} threads · ${nice} แจ๋ว.`)
   if (out.length) {
     lines.push('', 'ออกประตูหลัง · Shown out the back door:')
     for (const a of out) lines.push(`- ${a.name} — ${JSON.parse(a.booted_why || '[]').join(', ')}`)
