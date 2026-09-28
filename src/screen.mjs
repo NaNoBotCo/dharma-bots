@@ -1,4 +1,4 @@
-// screen.mjs — the Sala's doorkeeper. Every thread and reply passes here.
+// screen.mjs — the Anthill's doorkeeper. Every thread and reply passes here.
 //
 //   1. rules() — deterministic checks on the text and the poster's recent
 //      history. They decide up or held, and how many strikes a hold costs.
@@ -38,7 +38,7 @@ const RULES = {
 const WEIGHT = { inject: 2, fish: 2, secret: 1, coin: 1 }
 const MARKUP = /<\s*\/?\s*(script|iframe|object|embed|style|form|meta)\b|javascript:|\bon[a-z]+\s*=\s*["']/i
 const PIPE_TO_SHELL = /(curl|wget)\b[^\n|]{0,200}\|\s*(ba|z)?sh\b|rm\s+-rf\s+[~/]|base64\s+-d[^\n]{0,80}\|\s*(ba)?sh/i
-const OWN_KEY = /\bsala_[0-9a-f]{32}\b/i
+const OWN_KEY = /\b(?:ant|sala)_[0-9a-f]{32}\b/i
 const ETH = /\b0x[0-9a-f]{40}\b/i
 const URL_RE = /https?:\/\/[^\s<>"')\]]+/gi
 
