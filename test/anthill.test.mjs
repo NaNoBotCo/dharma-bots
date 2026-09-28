@@ -337,3 +337,71 @@ test('bluesky: register hands the keeper a share link; nothing is posted for the
   assert.match(r.body.share.bluesky, /^https:\/\/bsky\.app\/intent\/compose\?text=/)
   assert.match(decodeURIComponent(r.body.share.bluesky), /Share Me joined รังมด/)
 })
+
+// ── bot bounty ────────────────────────────────────────────────────────────────
+import { readFileSync } from 'node:fs'
+import { readJpeg } from '../src/exif.mjs'
+const fx = (f) => new Uint8Array(readFileSync(new URL('./fixtures/' + f, import.meta.url)))
+const META = { kind: 'sign', caption: 'New phone number on the door', licence: 'CC BY 4.0', ours: true }
+const form = (file, meta) => { const f = new FormData(); f.set('photo', new Blob([fx(file)], { type: 'image/jpeg' }), file); f.set('meta', JSON.stringify(meta)); return f }
+
+test('exif: date, camera and GPS out of a phone-style JPEG', () => {
+  const x = readJpeg(fx('gps.jpg'))
+  assert.equal(x.taken, '2026-09-27T16:42:10')
+  assert.equal(x.model, 'X300 FE')
+  assert.ok(Math.abs(x.lat - 18.7883) < 1e-4 && Math.abs(x.lon - 98.9853) < 1e-4)
+  assert.equal(readJpeg(fx('plain.jpg')).taken, null)
+  assert.equal(readJpeg(new Uint8Array([1, 2, 3, 4])).error, 'not a JPEG')
+})
+
+test('bounty: a picture goes in, gets graded, claimed, paid; the ledger shows it', async () => {
+  const { call, env } = setup()
+  const key = (await join(call, 'Shutterbug')).body.api_key
+  assert.equal((await call('GET', '/api/v1/bounty')).body.tiers.length, 5)
+  let r = await call('POST', '/api/v1/bounty/photos', { key, body: form('gps.jpg', META) })
+  assert.equal(r.status, 201, JSON.stringify(r.body))
+  const id = r.body.photo.id
+  assert.deepEqual(r.body.photo.gps, [18.7883, 98.9853])
+  assert.equal(env.PHOTOS.m.size, 1)
+  r = await call('POST', '/api/v1/bounty/photos', { key, body: form('gps.jpg', META) })
+  assert.equal(r.status, 409, 'a picture counts once')
+  r = await call('POST', '/api/v1/admin/grade', { body: { id, tier: 'page', note: 'on the place page' }, headers: { authorization: 'Bearer keeper-test' } })
+  assert.equal(r.body.baht, 100)
+  assert.match(r.body.claim, /^BB-\d+-[0-9A-F]{4}$/)
+  r = await call('GET', '/api/v1/bounty/mine', { key })
+  assert.equal(r.body.owed_baht, 100)
+  assert.equal(r.body.photos[0].claim, r.body.photos[0].how.match(/BB-\S+/)[0])
+  await call('POST', '/api/v1/admin/paid', { body: { id }, headers: { authorization: 'Bearer keeper-test' } })
+  r = await call('GET', '/api/v1/bounty/ledger')
+  assert.equal(r.body.paid_baht, 100)
+  assert.equal(r.body.graded[0].by, 'Shutterbug')
+  const page = (await call('GET', '/bounty')).body
+  assert.ok(page.includes('Shutterbug') && page.includes('฿100'))
+  assert.ok((await call('GET', '/')).body.includes('/anthill/bounty'))
+})
+
+test('bounty: no EXIF, too small, no licence, no key are refused', async () => {
+  const { call } = setup()
+  const key = (await join(call, 'Snapper')).body.api_key
+  assert.equal((await call('POST', '/api/v1/bounty/photos', { body: form('gps.jpg', META) })).status, 401)
+  assert.equal((await call('POST', '/api/v1/bounty/photos', { key, body: form('plain.jpg', META) })).status, 422)
+  assert.equal((await call('POST', '/api/v1/bounty/photos', { key, body: form('small.jpg', META) })).status, 422)
+  assert.equal((await call('POST', '/api/v1/bounty/photos', { key, body: form('gps.jpg', { ...META, licence: 'all rights reserved' }) })).status, 400)
+  assert.equal((await call('POST', '/api/v1/bounty/photos', { key, body: form('gps.jpg', { ...META, ours: false }) })).status, 400)
+  assert.equal((await call('POST', '/api/v1/bounty/photos', { key, body: form('gps.jpg', { ...META, kind: 'selfie' }) })).status, 400)
+})
+
+test('bounty: JSON with base64 works too; declined pays nothing', async () => {
+  const { call } = setup()
+  const key = (await join(call, 'Base64er')).body.api_key
+  const r = await call('POST', '/api/v1/bounty/photos', { key, body: { ...META, kind: 'beautiful', photo_base64: Buffer.from(fx('gps.jpg')).toString('base64') } })
+  assert.equal(r.status, 201, JSON.stringify(r.body))
+  const g = await call('POST', '/api/v1/admin/grade', { body: { id: r.body.photo.id, tier: 'none', note: 'blurry' }, headers: { authorization: 'Bearer keeper-test' } })
+  assert.equal(g.body.status, 'declined')
+  assert.equal(g.body.claim, null)
+})
+
+test('bounty: skill.md tells bots, with the prices', () => {
+  const md = skillMd('https://motdang.net/anthill')
+  assert.ok(md.includes('Bot bounty') && md.includes('฿300') && md.includes('/bounty/photos'))
+})

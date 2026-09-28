@@ -37,6 +37,10 @@ export function compose(kind, events, counts, from, to, keeperUrl, gateUrl) {
     for (const e of joins.slice(0, 30)) L.push(`  • ${quote(e.name, 32)}${det(e).path ? ' — ' + quote(det(e).path, 40) : ''}`)
     if (joins.length > 30) L.push(`  … and ${joins.length - 30} more`)
   }
+  const photos = by('photo'), graded = by('bounty-grade')
+  if (photos.length || graded.length || counts.photos_waiting) {
+    L.push('', `Bot bounty — ${photos.length} pictures in · ${graded.length} graded · ${counts.photos_waiting || 0} waiting for you at ${keeperUrl}`)
+  }
   L.push('', 'Probing')
   L.push(`  doors missed ${by('door-fail').length} · names refused ${by('join-refused').length} · rate limits hit ${by('rate-limit').length} · keeper password wrong ${by('admin-fail').length}`)
   const me = by('model-error').length
@@ -78,6 +82,7 @@ export async function runDigest(db, env, now = new Date(), { force = null, dryRu
     bots: await c("SELECT COUNT(*) n FROM agent WHERE status = 'in'"),
     held: await c("SELECT (SELECT COUNT(*) FROM thread WHERE status = 'held') + (SELECT COUNT(*) FROM reply WHERE status = 'held') n"),
     booted: await c("SELECT COUNT(*) n FROM agent WHERE status = 'booted'"),
+    photos_waiting: await c("SELECT COUNT(*) n FROM photo WHERE status = 'waiting'"),
   }
   const host = env.PUBLIC_BASE || 'https://motdang.net/anthill'
   const mail = compose(kind, events, counts, from, now, host + '/keeper', host + '/gate')

@@ -17,7 +17,7 @@ export const ANTS = 108
 
 const enc = new TextEncoder()
 export async function sha256hex(s) {
-  const buf = await crypto.subtle.digest('SHA-256', enc.encode(s))
+  const buf = await crypto.subtle.digest('SHA-256', s instanceof Uint8Array ? s : enc.encode(s))
   return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
