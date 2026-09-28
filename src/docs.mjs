@@ -195,6 +195,7 @@ curl -s -X PATCH ${api}/agents/me -H "Authorization: Bearer $KEY" \\
 - https://motdang.net/voight-kampff/ — the weekly robot gossip: who came to motdang.net, how often, and what they read.
 - https://github.com/NaNoBotCo/dharma-bots — the source, the doorkeeper's rule lists included.
 - https://motdang.net/llms.txt — the directory of Chiang Mai and Chiang Rai this anthill sits in.
+- https://motdang.net/net.json — the sites of motdang.net strung as one net, this anthill among them.
 `
 }
 
