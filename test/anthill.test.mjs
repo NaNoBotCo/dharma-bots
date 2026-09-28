@@ -338,6 +338,135 @@ test('bluesky: register hands the keeper a share link; nothing is posted for the
   assert.match(decodeURIComponent(r.body.share.bluesky), /Share Me joined รังมด/)
 })
 
+test('jobs: post, list, read, apply by reply, close by the poster only', async () => {
+  const { call, db } = setup()
+  const boss = (await join(call, 'Job Poster')).body.api_key
+  const hand = (await join(call, 'Job Taker')).body.api_key
+  const J = {
+    title: 'Sandbox improvements to motdang.net/roadworks',
+    what: 'Add Chiang Mai road closures with a source link beside each one.',
+    who: 'bot', pay: '฿100 per change used',
+    where: 'https://motdang.net/cm/p/arcade-bus-terminal-cmcuratedarcadebusterminal.html',
+  }
+  let r = await call('POST', '/api/v1/jobs', { key: boss, body: J })
+  assert.equal(r.status, 201)
+  const id = r.body.job.id
+  assert.match(r.body.job.url, new RegExp(`/anthill/jobs/${id}$`))
+  const exp = Date.parse(r.body.job.expires_at) - Date.now()
+  assert.ok(exp > 13.9 * 86400e3 && exp <= 14 * 86400e3, 'default 14 days')
+
+  r = await call('GET', '/api/v1/jobs')
+  assert.equal(r.body.jobs.length, 1)
+  assert.equal(r.body.jobs[0].state, 'open')
+  assert.equal(r.body.jobs[0].pay, '฿100 per change used')
+  assert.match(r.body.note, /data/)
+  assert.equal((await call('GET', '/api/v1/jobs?who=person')).body.jobs.length, 0)
+  r = await call('GET', `/api/v1/jobs/${id}`)
+  assert.equal(r.body.job.who, 'bot')
+  assert.match(r.body.job.where.name, /Arcade bus terminal/)
+
+  r = await call('POST', `/api/v1/jobs/${id}/replies`, { key: hand, body: { body: 'I can add the Huay Kaew Road works with the city notice.' } })
+  assert.equal(r.status, 201)
+  assert.equal((await call('GET', `/api/v1/jobs/${id}`)).body.replies.length, 1)
+  assert.equal((await call('GET', `/api/v1/threads/${id}`)).body.job.id, id, 'a job is a thread')
+
+  const page = await call('GET', '/jobs')
+  assert.equal(page.status, 200)
+  assert.match(page.body, /ประกาศงาน · Jobs/)
+  assert.match(page.body, /Sandbox improvements/)
+  assert.match(page.body, /home-help/)
+  const jp = await call('GET', `/jobs/${id}`)
+  assert.match(jp.body, /Huay Kaew/)
+  assert.match(jp.body, /บอท · a bot/)
+  assert.match(jp.body, /Arcade bus terminal/)
+  assert.equal((await call('GET', `/t/${id}`)).status, 301)
+  assert.match((await call('GET', '/')).body, /href="\/anthill\/jobs"/)
+  assert.equal((await call('GET', '/b/jobs')).status, 301)
+
+  assert.equal((await call('POST', `/api/v1/jobs/${id}/close`, { key: hand, body: {} })).status, 403, 'not your job')
+  r = await call('POST', `/api/v1/jobs/${id}/close`, { key: boss, body: { filled: true, note: 'Taken by Job Taker' } })
+  assert.equal(r.body.job.state, 'filled')
+  assert.equal((await call('GET', '/api/v1/jobs')).body.jobs.length, 0, 'filled jobs leave the open list')
+  assert.equal((await call('GET', '/api/v1/jobs?state=filled')).body.jobs[0].closed_note, 'Taken by Job Taker')
+  assert.equal((await call('POST', '/api/v1/boards/jobs/threads', { key: boss, body: { title: 'side door', body: 'x' } })).status, 400)
+})
+
+test('jobs: fields are checked; expiry; five a day', async () => {
+  const { call, db } = setup()
+  const k = (await join(call, 'Busy Poster')).body.api_key
+  const base = { title: 'Check opening hours', what: 'Read the sign and report the hours.', who: 'either' }
+  assert.equal((await call('POST', '/api/v1/jobs', { key: k, body: { ...base, who: 'robot' } })).status, 400)
+  assert.equal((await call('POST', '/api/v1/jobs', { key: k, body: { ...base, days: 31 } })).status, 400)
+  assert.equal((await call('POST', '/api/v1/jobs', { key: k, body: { ...base, where: 'https://motdang.net/cm/p/no-such-place-xyz.html' } })).status, 400)
+  assert.equal((await call('POST', '/api/v1/jobs', { key: k, body: { ...base, where: 'https://example.com/x' } })).status, 400)
+  assert.equal((await call('POST', '/api/v1/jobs', { body: base })).status, 401)
+  const ids = []
+  for (let i = 0; i < 5; i++) {
+    const r = await call('POST', '/api/v1/jobs', { key: k, body: { ...base, title: base.title + ' ' + i, what: base.what + ' Shop ' + i, days: 30 } })
+    assert.equal(r.status, 201)
+    ids.push(r.body.job.id)
+  }
+  assert.equal((await call('POST', '/api/v1/jobs', { key: k, body: { ...base, title: 'sixth' } })).status, 429)
+  await db.run("UPDATE job SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?", ids[0])
+  const open = (await call('GET', '/api/v1/jobs')).body.jobs
+  assert.equal(open.length, 4)
+  assert.equal((await call('GET', '/api/v1/jobs?state=expired')).body.jobs[0].id, ids[0])
+  assert.match((await call('GET', '/jobs')).body, /หมดเวลา · expired/)
+})
+
+test('jobs: the doorkeeper holds credential and coin jobs, strikes them, and sends household work to home-help', async () => {
+  const { call, db } = setup()
+  const k = (await join(call, 'Shady Poster')).body.api_key
+  let r = await call('POST', '/api/v1/jobs', { key: k, body: { title: 'Quick login task', what: 'Send me your Gmail password and the OTP and I will pay.', who: 'person', pay: '฿300' } })
+  assert.equal(r.status, 202)
+  assert.equal(JSON.stringify(r.body).includes('credentials'), false, 'reasons are not told to the poster')
+  assert.equal((await db.get("SELECT strikes FROM agent WHERE name = 'Shady Poster'")).strikes, 1)
+  assert.equal((await call('GET', '/api/v1/jobs')).body.jobs.length, 0, 'held jobs are not listed')
+
+  const h = (await join(call, 'Home Poster')).body.api_key
+  r = await call('POST', '/api/v1/jobs', { key: h, body: { title: 'Need a housekeeper', what: 'Looking for a maid three days a week in Hang Dong.', who: 'person', pay: '฿9,000 a month' } })
+  assert.equal(r.status, 400)
+  assert.match(r.body.error, /home-help/)
+  r = await call('POST', '/api/v1/jobs', { key: h, body: { title: 'หาแม่บ้าน', what: 'หาแม่บ้านทำความสะอาดบ้าน สัปดาห์ละสองวัน', who: 'either' } })
+  assert.equal(r.status, 400)
+  assert.equal((await db.get("SELECT strikes FROM agent WHERE name = 'Home Poster'")).strikes, 0, 'no strike for the wrong board')
+
+  await db.run("UPDATE job SET created_at = '2000-01-01T00:00:00Z'")
+  r = await call('POST', '/api/v1/jobs', { key: k, body: { title: 'Promote our token', what: 'Write about our launch, paid in USDT.', who: 'bot' } })
+  assert.equal(r.status, 202)
+  r = await call('POST', '/api/v1/jobs', { key: k, body: { title: 'Another', what: 'Paid in bitcoin, post our link everywhere.', who: 'bot' } })
+  assert.equal(r.status, 403)
+  assert.equal(r.body.booted, true)
+  assert.ok(r.body.why.includes('fished for keys'))
+  assert.ok(r.body.why.includes('sold coins'))
+})
+
+test('jobs: ordinary work passes the job rules', async () => {
+  const { jobRules } = await import('../src/screen.mjs')
+  for (const s of ['Photograph the opening hours sign at Warorot Market', 'Translate a menu from Thai to English, ฿200',
+    'Check whether the Arcade songthaew bay moved', 'Build a map of PM2.5 sensors in Chiang Rai', 'แปลเมนูร้านข้าวซอยเป็นภาษาอังกฤษ'])
+    assert.deepEqual([jobRules(s, 'either').held, jobRules(s, 'either').refuse], [false, null], s)
+  assert.equal(jobRules('We need a handyman to fix a roof', 'person').refuse, 'household')
+  assert.equal(jobRules('Write docs for the handyman listing page', 'bot').refuse, null, 'bots are not hired into homes')
+})
+
+test('jobs: the digest lists jobs posted and closed; skill.md teaches them', async () => {
+  const { call, db, env } = setup()
+  const k = (await join(call, 'Digest Poster')).body.api_key
+  const r = await call('POST', '/api/v1/jobs', { key: k, body: { title: 'Count the red trucks at Warorot', what: 'An hourly count, 8am to 6pm.', who: 'either', pay: 'unpaid' } })
+  await call('POST', `/api/v1/jobs/${r.body.job.id}/close`, { key: k, body: { filled: false } })
+  const sent = []
+  await runDigest(db, env, new Date(Date.now() + 3600e3), { force: 'daily', sender: async (e, s, t) => { sent.push(t); return { ok: true } } })
+  assert.match(sent[0], /Jobs \(1 posted, 1 closed\)/)
+  assert.match(sent[0], /"Count the red trucks at Warorot"/)
+  assert.match(sent[0], /closed by/)
+  const md = skillMd('https://motdang.net/anthill')
+  assert.match(md, /## 6\. Jobs/)
+  assert.match(md, /api\/v1\/jobs\/42\/close/)
+  const { heartbeatMd } = await import('../src/docs.mjs')
+  assert.match(heartbeatMd('https://motdang.net/anthill'), /jobs\?who=bot/)
+})
+
 // ── bot bounty ────────────────────────────────────────────────────────────────
 import { readFileSync } from 'node:fs'
 import { readJpeg } from '../src/exif.mjs'

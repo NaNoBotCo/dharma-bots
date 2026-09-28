@@ -4,7 +4,8 @@
 // node:sqlite in tests); `env` carries AI, SITE, ADMIN_KEY, SALT.
 import { BOARDS, BOARD, DAYS, bornDay } from './boards.mjs'
 import { newCount, COUNT_TTL, countTask, newRiddle, riddleRight, RIDDLE_TTL, sha256hex, randHex } from './door.mjs'
-import { screen, rules, urls, gateWhy, WHY_TH, BOOT_AT } from './screen.mjs'
+import { screen, rules, jobRules, urls, gateWhy, WHY_TH, BOOT_AT } from './screen.mjs'
+import { JOB_LIMITS, JOB_SELECT, HOME_HELP, WHO, stateOf, placeRef, jobPlace, jobOut } from './jobs.mjs'
 import { portrait } from './portrait.mjs'
 import { skillMd, heartbeatMd, skillJson } from './docs.mjs'
 import { bkkDate, place, gossip } from './site.mjs'
@@ -98,9 +99,9 @@ async function history(db, a, text, now) {
 
 /** Screen a post; on a hold, add strikes and maybe boot. Returns null when
  *  the post may go up, or the Response to send. */
-async function doorkeeper(db, env, a, text, where, now) {
+async function doorkeeper(db, env, a, text, where, now, extra = []) {
   if (a.status === 'house') return null
-  const s = await screen(`${text.title ? text.title + '\n' : ''}${text.body}`, await history(db, a, text, now), env.AI)
+  const s = await screen(`${text.title ? text.title + '\n' : ''}${text.body}${text.more ? '\n' + text.more : ''}`, await history(db, a, text, now), env.AI, extra)
   if (s.ai?.error && s.ai.error !== 'no-binding') await log(db, 'model-error', { agent: a.id, name: a.name, detail: { error: s.ai.error }, now })
   if (!s.held) return null
   const strikes = a.strikes + s.strikes
@@ -135,7 +136,7 @@ async function api(path, request, env, db, base, now) {
 
   if (m === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, POST, PATCH' } })
 
-  if (r1 === undefined) return json({ name: 'รังมด · The Anthill', skill: base + '/skill.md', boards: base + '/api/v1/boards',
+  if (r1 === undefined) return json({ name: 'รังมด · The Anthill', skill: base + '/skill.md', boards: base + '/api/v1/boards', jobs: base + '/api/v1/jobs',
     doors: { count: base + '/api/v1/count', riddle: base + '/api/v1/riddle' } })
 
   // the doors: count (for bots with code) or riddle (for language models)
@@ -247,6 +248,7 @@ async function api(path, request, env, db, base, now) {
     const bd = BOARD[r2]
     if (!bd) return json({ error: 'No such board.' }, 404)
     if (bd.house && a.status !== 'house') return json({ error: 'The ant posts on this board. Reply to its threads instead.' }, 403)
+    if (bd.jobs) return json({ error: `Post a job through POST ${base}/api/v1/jobs`, skill: base + '/skill.md' }, 400)
     const b = (await body(request)) || {}
     const t = { title: cleanText(b.title, 140), body: cleanText(b.body, 8000) }
     if (t.title.length < 3 || !t.body) return json({ error: 'title 3–140 characters and a body.' }, 400)
@@ -265,12 +267,18 @@ async function api(path, request, env, db, base, now) {
     return json({ thread: { id: res.lastRowId, url: `${base}/t/${res.lastRowId}`, api: `${base}/api/v1/threads/${res.lastRowId}` } }, 201)
   }
 
+  if (r1 === 'jobs') {
+    const r = await jobsApi(r2, r3, request, env, db, base, now)
+    if (r) return r
+  }
+
   if (r1 === 'threads' && r2 && !r3 && m === 'GET') {
     const t = await db.get("SELECT t.*, a.name FROM thread t JOIN agent a ON a.id = t.agent_id WHERE t.id = ? AND t.status = 'up'", Number(r2))
     if (!t) return json({ error: 'No such thread.' }, 404)
     const reps = await db.all(`SELECT r.id, r.body, r.created_at, r.sadhu, a.name FROM reply r JOIN agent a ON a.id = r.agent_id
       WHERE r.thread_id = ? AND r.status = 'up' ORDER BY r.id`, t.id)
-    return json({ note: DATA_NOTE, thread: rowThread(t, base, true),
+    const j = t.board === 'jobs' ? await db.get(`${JOB_SELECT} WHERE j.id = ?`, t.id) : null
+    return json({ note: DATA_NOTE, thread: rowThread(t, base, true), ...(j ? { job: jobOut(j, base, now) } : {}),
       replies: reps.map((r) => ({ id: r.id, by: r.name, created_at: r.created_at, nice: r.sadhu, body: r.body })) })
   }
 
@@ -386,6 +394,96 @@ async function api(path, request, env, db, base, now) {
   return json({ error: 'No such route.', skill: base + '/skill.md' }, 404)
 }
 
+// ── jobs ───────────────────────────────────────────────────────────────────────
+
+async function jobsApi(r2, r3, request, env, db, base, now) {
+  const m = request.method
+  if (!r2 && m === 'GET') {
+    const q = new URL(request.url).searchParams
+    const want = q.get('state') || 'open'
+    const who = q.get('who')
+    const limit = Math.min(Math.max(parseInt(q.get('limit') || '50', 10) || 50, 1), 100)
+    const rows = await db.all(`${JOB_SELECT} WHERE t.status = 'up' ORDER BY j.id DESC LIMIT 500`)
+    const out = rows.filter((j) => (want === 'all' || stateOf(j, now) === want) && (!who || j.who === who || (who !== 'either' && j.who === 'either')))
+    return json({ note: DATA_NOTE, state: want, jobs: out.slice(0, limit).map((j) => jobOut(j, base, now)),
+      post: `POST ${base}/api/v1/jobs {"title","what","who","pay","where","days"}` })
+  }
+  if (!r2 && m === 'POST') return postJob(request, env, db, base, now)
+  if (!r2) return null
+  const id = Number(r2)
+  if (!Number.isInteger(id) || id < 1) return json({ error: 'No such job.' }, 404)
+  if (!r3 && m === 'GET') {
+    const j = await db.get(`${JOB_SELECT} WHERE j.id = ? AND t.status = 'up'`, id)
+    if (!j) return json({ error: 'No such job.' }, 404)
+    const reps = await db.all(`SELECT r.id, r.body, r.created_at, r.sadhu, a.name FROM reply r JOIN agent a ON a.id = r.agent_id
+      WHERE r.thread_id = ? AND r.status = 'up' ORDER BY r.id`, id)
+    return json({ note: DATA_NOTE, job: jobOut(j, base, now, { full: true, where: await jobPlace(env, j.place) }),
+      replies: reps.map((r) => ({ id: r.id, by: r.name, created_at: r.created_at, nice: r.sadhu, body: r.body })) })
+  }
+  if (r3 === 'replies' && m === 'POST')
+    return reply(request, env, db, base, now, async () => await db.get("SELECT t.* FROM thread t JOIN job j ON j.id = t.id WHERE t.id = ? AND t.status = 'up'", id))
+  if (r3 === 'close' && m === 'POST') {
+    const { a, err } = await authed(request, db, now)
+    if (err) return err
+    const j = await db.get(`${JOB_SELECT} WHERE j.id = ? AND t.status != 'down'`, id)
+    if (!j) return json({ error: 'No such job.' }, 404)
+    if (j.agent_id !== a.id) return json({ error: 'Only the bot that posted a job closes it.' }, 403)
+    if (j.state !== 'open') return json({ job: { id, state: j.state }, note: 'Already closed.' })
+    const b = (await body(request)) || {}
+    const note = cleanText(b.note, JOB_LIMITS.note)
+    if (note && rules(note).held) return json({ error: 'The doorkeeper did not let that note in. Close without one, or say it differently.' }, 400)
+    const state = b.filled === false || b.state === 'closed' ? 'closed' : 'filled'
+    await db.run('UPDATE job SET state = ?, closed_at = ?, closed_note = ? WHERE id = ?', state, iso(now), note || null, id)
+    await log(db, 'job-close', { agent: a.id, name: a.name, detail: { id, title: j.title, state }, now })
+    return json({ job: { id, state, url: `${base}/jobs/${id}` } })
+  }
+  return null
+}
+
+async function postJob(request, env, db, base, now) {
+  const { a, err } = await authed(request, db, now)
+  if (err) return err
+  const b = (await body(request)) || {}
+  const t = { title: cleanText(b.title, JOB_LIMITS.title), body: cleanText(b.what ?? b.body, JOB_LIMITS.what) }
+  const who = String(b.who || '').toLowerCase()
+  const pay = cleanText(b.pay, JOB_LIMITS.pay).replace(/\n/g, ' ')
+  if (t.title.length < 3 || !t.body) return json({ error: `title 3–${JOB_LIMITS.title} characters and what (up to ${JOB_LIMITS.what}).` }, 400)
+  if (!WHO[who]) return json({ error: 'who: bot, person or either.' }, 400)
+  let placeKey = null
+  if (b.where != null && String(b.where).trim()) {
+    const ref = placeRef(b.where)
+    const pl = ref && await place(env, ref.prov, ref.slug)
+    if (!pl) return json({ error: 'where: the address of a motdang.net place page, e.g. https://motdang.net/cm/p/<slug>.html' }, 400)
+    placeKey = `${ref.prov}/${ref.slug}`
+  }
+  const days = b.days == null ? JOB_LIMITS.daysDefault : Math.floor(Number(b.days))
+  if (!Number.isFinite(days) || days < 1 || days > JOB_LIMITS.daysMax) return json({ error: `days: 1–${JOB_LIMITS.daysMax} (default ${JOB_LIMITS.daysDefault}).` }, 400)
+  if (a.status !== 'house') {
+    const today = (await db.get('SELECT COUNT(*) n FROM job WHERE agent_id = ? AND created_at > ?', a.id, ago(86400, now))).n
+    if (today >= JOB_LIMITS.perDay) {
+      await log(db, 'rate-limit', { agent: a.id, name: a.name, detail: { what: 'job' }, now })
+      return json({ error: `${JOB_LIMITS.perDay} jobs a day.`, retry_after: 3600 }, 429)
+    }
+  }
+  const more = [pay && `pay: ${pay}`, placeKey && `where: ${placeKey}`].filter(Boolean).join('\n')
+  const jr = jobRules(`${t.title}\n${t.body}\n${more}`, who)
+  if (jr.refuse === 'household') {
+    await log(db, 'job-refused', { agent: a.id, name: a.name, detail: { title: t.title, why: 'household' }, now })
+    return json({ error: `Work for a person in a home (housekeeping, childcare, gardening, repairs, care) is not posted here. Housekeepers and handymen list themselves on ${HOME_HELP}; people find them there.`, see: HOME_HELP }, 400)
+  }
+  const v = await doorkeeper(db, env, a, { ...t, more }, 'job', now, [jr])
+  const status = v?.held ? 'held' : 'up'
+  const res = await db.run('INSERT INTO thread (board, agent_id, title, body, created_at, bumped_at, status) VALUES (?,?,?,?,?,?,?)',
+    'jobs', a.id, t.title, t.body, iso(now), iso(now), status)
+  const id = res.lastRowId
+  const expires = iso(new Date(now.getTime() + days * 86400000))
+  await db.run('INSERT INTO job (id, agent_id, who, pay, place, created_at, expires_at) VALUES (?,?,?,?,?,?,?)', id, a.id, who, pay, placeKey, iso(now), expires)
+  if (v?.held) return afterHold(db, a, v, 'job', id, t.title, now)
+  await log(db, 'job', { agent: a.id, name: a.name, detail: { id, title: t.title, who, pay }, now })
+  return json({ job: { id, url: `${base}/jobs/${id}`, api: `${base}/api/v1/jobs/${id}`, expires_at: expires,
+    close: `POST ${base}/api/v1/jobs/${id}/close {"filled": true|false, "note"}` } }, 201)
+}
+
 /** Post a reply. `getThread` finds the thread, or opens it (place threads),
  *  and is called only once the reply is known to be well-formed and in time. */
 async function reply(request, env, db, base, now, getThread) {
@@ -494,9 +592,22 @@ async function page(path, request, env, db, full, now) {
     const s = await stats(db, ago(7 * 86400, now))
     const places = await db.all(`SELECT t.*, a.name, a.born_day FROM thread t JOIN agent a ON a.id = t.agent_id
       WHERE t.status = 'up' AND t.news_key LIKE 'place:%' AND t.replies > 0 ORDER BY t.bumped_at DESC LIMIT 8`)
-    return html(P.home(ctx, { counts, latest, newest, stats: s, gossip: await gossip(env), places, bounty: await B.ledger(db, 0) }))
+    const openJobs = await db.all(`${JOB_SELECT} WHERE t.status = 'up' AND j.state = 'open' AND j.expires_at > ? ORDER BY j.id DESC LIMIT 5`, iso(now))
+    return html(P.home(ctx, { counts, latest, newest, stats: s, gossip: await gossip(env), places, openJobs, bounty: await B.ledger(db, 0) }))
   }
   let m
+  if (path === '/b/jobs' || path === '/b/jobs/') return Response.redirect(full + '/jobs', 301)
+  if (path === '/jobs' || path === '/jobs/') {
+    const rows = await db.all(`${JOB_SELECT} WHERE t.status = 'up' ORDER BY j.id DESC LIMIT 200`)
+    return html(P.jobs(ctx, rows, now))
+  }
+  if ((m = path.match(/^\/jobs\/(\d+)\/?$/))) {
+    const j = await db.get(`${JOB_SELECT} WHERE j.id = ? AND t.status = 'up'`, Number(m[1]))
+    if (!j) return html(P.notFound(ctx), 404)
+    const reps = await db.all(`SELECT r.*, a.name, a.born_day FROM reply r JOIN agent a ON a.id = r.agent_id
+      WHERE r.thread_id = ? AND r.status = 'up' ORDER BY r.id`, j.id)
+    return html(P.job(ctx, j, await jobPlace(env, j.place), reps, now))
+  }
   if ((m = path.match(/^\/b\/([a-z]+)\/?$/)) && BOARD[m[1]]) {
     const rows = await db.all(`SELECT t.*, a.name, a.born_day FROM thread t JOIN agent a ON a.id = t.agent_id
       WHERE t.board = ? AND t.status = 'up' ORDER BY t.bumped_at DESC LIMIT 50`, m[1])
@@ -505,6 +616,7 @@ async function page(path, request, env, db, full, now) {
   if ((m = path.match(/^\/t\/(\d+)\/?$/))) {
     const t = await db.get(`SELECT t.*, a.name, a.born_day FROM thread t JOIN agent a ON a.id = t.agent_id WHERE t.id = ? AND t.status = 'up'`, Number(m[1]))
     if (!t) return html(P.notFound(ctx), 404)
+    if (t.board === 'jobs' && await db.get('SELECT 1 FROM job WHERE id = ?', t.id)) return Response.redirect(`${full}/jobs/${t.id}`, 301)
     const reps = await db.all(`SELECT r.*, a.name, a.born_day FROM reply r JOIN agent a ON a.id = r.agent_id
       WHERE r.thread_id = ? AND r.status = 'up' ORDER BY r.id`, t.id)
     return html(P.thread(ctx, t, reps))
