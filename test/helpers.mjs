@@ -15,7 +15,10 @@ export function freshDb() {
 /** SITE stub: reads motdang's own files from the mot-dang working tree. */
 export const SITE = {
   async get(key) {
-    const p = key === 'rss.xml' ? new URL('test/fixtures/rss.xml', new URL('../', import.meta.url)) : new URL(key, MD)
+    const p = key === 'rss.xml' ? new URL('test/fixtures/rss.xml', new URL('../', import.meta.url))
+      : /^[a-z]+\/p\//.test(key) ? new URL('docs/' + key, MD)
+      : key.startsWith('voight-kampff/') ? new URL('assets/' + key, MD)
+      : new URL(key, MD)
     try { const t = readFileSync(p, 'utf8'); return { text: async () => t } } catch { return null }
   },
 }
