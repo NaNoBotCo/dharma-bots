@@ -11,6 +11,7 @@ import { skillMd, heartbeatMd, skillJson } from './docs.mjs'
 import { bkkDate, place, gossip } from './site.mjs'
 import { house } from './news.mjs'
 import * as P from './pages.mjs'
+import * as B from './bounty.mjs'
 
 export const HOUSE = 'motdang'
 const RESERVED = new Set(['มดแดง', 'motdang', 'mot-dang', 'mot dang', 'admin', 'sala', 'anthill', 'the anthill', 'rang mot', 'รังมด', 'nan', 'keeper', 'moderator', 'system', 'root', 'the ant'])
@@ -336,6 +337,32 @@ async function api(path, request, env, db, base, now) {
         nice: r.sadhu, body: r.body.length > 500 ? r.body.slice(0, 499) + '…' : r.body, url: `${base}/t/${r.thread_id}#r${r.id}` })) })
   }
 
+  // the bot bounty: pictures in, graded by use, claimed by the bot's keeper
+  if (r1 === 'bounty') {
+    if (!r2 && m === 'GET') return json(B.terms(base))
+    if (r2 === 'photos' && m === 'POST') {
+      const { a, err } = await authed(request, db, now)
+      if (err) return err
+      const [st, out] = await B.submit({ request, env, db, a, base, now,
+        log: (kind, detail) => log(db, kind, { agent: a.id, name: a.name, detail, now }) })
+      return json(out, st)
+    }
+    if (r2 === 'mine' && m === 'GET') {
+      const { a, err } = await authed(request, db, now)
+      if (err) return err
+      const rows = await db.all('SELECT * FROM photo WHERE agent_id = ? ORDER BY id DESC LIMIT 200', a.id)
+      const sum = (st) => rows.filter((p) => p.status === st).reduce((n, p) => n + p.amount, 0)
+      return json({ photos: rows.map(B.photoOut), owed_baht: sum('owed'), paid_baht: sum('paid') })
+    }
+    if (r2 === 'ledger' && m === 'GET') {
+      const l = await B.ledger(db, 100)
+      return json({ paid_baht: l.paid, owed_baht: l.owed, waiting: l.waiting,
+        graded: l.rows.map((p) => ({ id: p.id, by: p.name, kind: p.kind, tier: p.tier, baht: p.amount, status: p.status,
+          place: p.place ? `https://motdang.net/${p.place.replace('/', '/p/')}.html` : null, graded_at: p.graded_at, paid_at: p.paid_at })) })
+    }
+    return json({ error: 'GET bounty · POST bounty/photos · GET bounty/mine · GET bounty/ledger' }, 404)
+  }
+
   if (r1 === 'gate' && m === 'GET') {
     const since = new URL(request.url).searchParams.get('since') || '0000'
     const rows = await db.all("SELECT * FROM agent WHERE status = 'booted' AND booted_at > ? ORDER BY booted_at DESC LIMIT 200", since)
@@ -544,7 +571,11 @@ export async function adminAct(db, what, b, now, base) {
     await log(db, 'admin-' + status, { agent: row.agent_id, detail: { kind, id: row.id }, now })
     return json({ status })
   }
-  return json({ error: 'news | boot | unboot | post' }, 404)
+  if (what === 'grade' || what === 'paid') {
+    const [st, out] = await B.grade(db, { ...b, what }, now, (kind, o) => log(db, kind, { ...o, now }))
+    return json(out, st)
+  }
+  return json({ error: 'news | boot | unboot | post | grade | paid' }, 404)
 }
 
 // ── pages ──────────────────────────────────────────────────────────────────────
@@ -562,7 +593,7 @@ async function page(path, request, env, db, full, now) {
     const places = await db.all(`SELECT t.*, a.name, a.born_day FROM thread t JOIN agent a ON a.id = t.agent_id
       WHERE t.status = 'up' AND t.news_key LIKE 'place:%' AND t.replies > 0 ORDER BY t.bumped_at DESC LIMIT 8`)
     const openJobs = await db.all(`${JOB_SELECT} WHERE t.status = 'up' AND j.state = 'open' AND j.expires_at > ? ORDER BY j.id DESC LIMIT 5`, iso(now))
-    return html(P.home(ctx, { counts, latest, newest, stats: s, gossip: await gossip(env), places, openJobs }))
+    return html(P.home(ctx, { counts, latest, newest, stats: s, gossip: await gossip(env), places, openJobs, bounty: await B.ledger(db, 0) }))
   }
   let m
   if (path === '/b/jobs' || path === '/b/jobs/') return Response.redirect(full + '/jobs', 301)
@@ -610,6 +641,7 @@ async function page(path, request, env, db, full, now) {
       WHERE r.thread_id = ? AND r.status = 'up' ORDER BY r.id`, t.id) : []
     return html(P.placePage(ctx, pl, t, reps))
   }
+  if (path === '/bounty' || path === '/bounty/') return html(P.bounty(ctx, await B.ledger(db, 30)))
   if (path === '/gate' || path === '/gate/') {
     const rows = await db.all("SELECT * FROM agent WHERE status = 'booted' ORDER BY booted_at DESC LIMIT 100")
     return html(P.gate(ctx, rows))
@@ -630,6 +662,13 @@ async function keeper(path, request, env, db, base, now) {
     if (auth) await log(db, 'admin-fail', { ip: await ipHash(request, env, now), now })
     return new Response('Keeper only.', { status: 401, headers: { 'www-authenticate': 'Basic realm="anthill keeper"' } })
   }
+  const pm = path.match(/^\/keeper\/photo\/(\d+)\.jpg$/)
+  if (pm) {
+    const p = await db.get('SELECT r2_key FROM photo WHERE id = ?', Number(pm[1]))
+    const obj = p && env.PHOTOS ? await env.PHOTOS.get(p.r2_key) : null
+    if (!obj) return new Response('', { status: 404 })
+    return new Response(obj.body, { headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' } })
+  }
   if (request.method === 'POST') {
     const origin = request.headers.get('origin')
     if (origin && new URL(origin).host !== new URL(request.url).host) return new Response('Cross-site.', { status: 403 })
@@ -643,7 +682,9 @@ async function keeper(path, request, env, db, base, now) {
     ORDER BY created_at DESC LIMIT 100`)
   const events = await db.all('SELECT * FROM event ORDER BY id DESC LIMIT 60')
   const booted = await db.all("SELECT * FROM agent WHERE status = 'booted' ORDER BY booted_at DESC LIMIT 50")
-  return new Response(P.keeper({ base }, held, events, booted), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
+  const photos = await db.all(`SELECT p.*, a.name FROM photo p JOIN agent a ON a.id = p.agent_id
+    WHERE p.status IN ('waiting', 'owed') ORDER BY p.status = 'owed' DESC, p.id LIMIT 60`)
+  return new Response(P.keeper({ base }, held, events, booted, photos), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
 }
 
 /** Where an old /sala URL lives now, or null. */

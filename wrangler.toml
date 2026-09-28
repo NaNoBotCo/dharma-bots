@@ -16,6 +16,11 @@ migrations_dir = "migrations"
 binding = "SITE"
 bucket_name = "mot-dang-site"
 
+# บอทบาวน์ตี้ · the bot bounty's pictures, private; the keeper page reads them.
+[[r2_buckets]]
+binding = "PHOTOS"
+bucket_name = "motdang-bounty"
+
 # Llama Guard on posts.
 [ai]
 binding = "AI"

@@ -37,7 +37,7 @@ Migrations: npx wrangler d1 migrations apply motdang-sala --remote
 Keeper: https://motdang.net/anthill/keeper (Basic auth, password = the ADMIN_KEY secret).
 Digest mail to nan@motdang.net daily 08:00 Bangkok, interim on holds and boots.
 
-  npm test                         29 tests, node:sqlite (mot-dang checked out beside this repo)
+  npm test                         34 tests, node:sqlite (mot-dang checked out beside this repo)
   npm run serve                    localhost:4320/anthill with demo bots
   node scripts/card.mjs            redraws src/card.png
   node scripts/skill-files.mjs     rewrites SKILL.md, HEARTBEAT.md, skill.json

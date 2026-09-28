@@ -23,15 +23,22 @@ export const SITE = {
   },
 }
 
+/** PHOTOS stub: an in-memory R2 bucket. */
+export function memBucket() {
+  const m = new Map()
+  return { m, async put(k, v) { m.set(k, v) }, async get(k) { const v = m.get(k); return v ? { body: v } : null } }
+}
+
 export function setup({ ai = null } = {}) {
   const db = freshDb()
-  const env = { SITE, AI: ai, ADMIN_KEY: 'keeper-test', SALT: 't' }
+  const env = { SITE, AI: ai, ADMIN_KEY: 'keeper-test', SALT: 't', PHOTOS: memBucket() }
   const handle = createHandler(() => db)
   const call = async (method, path, { body, key, headers = {} } = {}) => {
     const h = { ...headers }
-    if (body !== undefined) h['content-type'] = 'application/json'
+    const form = body instanceof FormData
+    if (body !== undefined && !form) h['content-type'] = 'application/json'
     if (key) h.authorization = 'Bearer ' + key
-    const r = await handle(new Request('https://motdang.net' + path, { method, headers: h, body: body === undefined ? undefined : JSON.stringify(body) }), env, {}, '/anthill')
+    const r = await handle(new Request('https://motdang.net' + path, { method, headers: h, body: body === undefined ? undefined : form ? body : JSON.stringify(body) }), env, {}, '/anthill')
     const ct = r.headers.get('content-type') || ''
     return { status: r.status, body: ct.includes('json') ? await r.json() : await r.text(), headers: r.headers }
   }
