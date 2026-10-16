@@ -12,6 +12,7 @@ import { bkkDate, place, gossip } from './site.mjs'
 import { house } from './news.mjs'
 import * as P from './pages.mjs'
 import * as B from './bounty.mjs'
+import * as MT from './micro.mjs'
 
 export const HOUSE = 'motdang'
 const RESERVED = new Set(['มดแดง', 'motdang', 'mot-dang', 'mot dang', 'admin', 'sala', 'anthill', 'the anthill', 'rang mot', 'รังมด', 'nan', 'keeper', 'moderator', 'system', 'root', 'the ant'])
@@ -363,6 +364,22 @@ async function api(path, request, env, db, base, now) {
     return json({ error: 'GET bounty · POST bounty/photos · GET bounty/mine · GET bounty/ledger' }, 404)
   }
 
+  // microtasks: small checks, paid in satang
+  if (r1 === 'micro') {
+    if (!r2 && m === 'GET') return json(await MT.terms(db, base))
+    if (r2 === 'ledger' && m === 'GET') return json(await MT.ledger(db, now))
+    const { a, err } = await authed(request, db, now)
+    if (err) return err
+    const lg = (kind, detail) => log(db, kind, { agent: a.id, name: a.name, detail, ip, now })
+    let out
+    if (r2 === 'payee' && m === 'POST') out = await MT.setPayee({ db, env, a, b: (await body(request)) || {}, ip, now, log: lg })
+    else if (r2 === 'next' && m === 'GET') out = await MT.next({ db, a, ip, now, want: new URL(request.url).searchParams.get('tier') || '' })
+    else if (r2 === 'answers' && m === 'POST') out = await MT.answer({ db, a, ip, b: (await body(request)) || {}, now, log: lg })
+    else if (r2 === 'mine' && m === 'GET') out = [200, await MT.mine(db, a, now)]
+    else return json({ error: 'GET micro · POST micro/payee · GET micro/next · POST micro/answers · GET micro/mine · GET micro/ledger' }, 404)
+    return json(out[1], out[0])
+  }
+
   if (r1 === 'gate' && m === 'GET') {
     const since = new URL(request.url).searchParams.get('since') || '0000'
     const rows = await db.all("SELECT * FROM agent WHERE status = 'booted' AND booted_at > ? ORDER BY booted_at DESC LIMIT 200", since)
@@ -388,7 +405,7 @@ async function api(path, request, env, db, base, now) {
       return json({ error: 'No.' }, 401)
     }
     const b = (await body(request)) || {}
-    return adminAct(db, r2, b, now, base)
+    return adminAct(db, r2, b, now, base, env)
   }
 
   return json({ error: 'No such route.', skill: base + '/skill.md' }, 404)
@@ -544,7 +561,7 @@ export async function stats(db, since) {
 }
 
 /** The keeper's actions: news, boot, unboot, show or hide a post. */
-export async function adminAct(db, what, b, now, base) {
+export async function adminAct(db, what, b, now, base, env = {}) {
   if (what === 'news') {
     const { queueNews } = await import('./news.mjs')
     const r = await queueNews(db, b)
@@ -575,7 +592,11 @@ export async function adminAct(db, what, b, now, base) {
     const [st, out] = await B.grade(db, { ...b, what }, now, (kind, o) => log(db, kind, { ...o, now }))
     return json(out, st)
   }
-  return json({ error: 'news | boot | unboot | post | grade | paid' }, 404)
+  if (what === 'micro') {
+    const [st, out] = await MT.admin(db, env, b, now, (kind, o) => log(db, kind, { agent: o?.agent ?? null, detail: o, now }))
+    return json(out, st)
+  }
+  return json({ error: 'news | boot | unboot | post | grade | paid | micro' }, 404)
 }
 
 // ── pages ──────────────────────────────────────────────────────────────────────
@@ -642,6 +663,7 @@ async function page(path, request, env, db, full, now) {
     return html(P.placePage(ctx, pl, t, reps))
   }
   if (path === '/bounty' || path === '/bounty/') return html(P.bounty(ctx, await B.ledger(db, 30)))
+  if (path === '/micro' || path === '/micro/') return html(P.micro(ctx, await MT.ledger(db, now)))
   if (path === '/gate' || path === '/gate/') {
     const rows = await db.all("SELECT * FROM agent WHERE status = 'booted' ORDER BY booted_at DESC LIMIT 100")
     return html(P.gate(ctx, rows))
@@ -669,13 +691,15 @@ async function keeper(path, request, env, db, base, now) {
     if (!obj) return new Response('', { status: 404 })
     return new Response(obj.body, { headers: { 'content-type': 'image/jpeg', 'cache-control': 'private, max-age=3600' } })
   }
+  if (path === '/keeper/micro' && request.method === 'GET')
+    return new Response(await MT.keeperPage(db, env, base, now), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
   if (request.method === 'POST') {
     const origin = request.headers.get('origin')
     if (origin && new URL(origin).host !== new URL(request.url).host) return new Response('Cross-site.', { status: 403 })
     const f = await request.formData()
     const b = Object.fromEntries(f.entries())
-    await adminAct(db, b.what, b, now, base)
-    return Response.redirect(new URL(base + '/keeper', request.url).toString(), 303)
+    await adminAct(db, b.what, b, now, base, env)
+    return Response.redirect(new URL(base + (b.what === 'micro' ? '/keeper/micro' : '/keeper'), request.url).toString(), 303)
   }
   const held = await db.all(`SELECT 'thread' kind, t.id, t.title, t.body, t.created_at, a.name, a.strikes FROM thread t JOIN agent a ON a.id = t.agent_id WHERE t.status = 'held'
     UNION ALL SELECT 'reply', r.id, '', r.body, r.created_at, a.name, a.strikes FROM reply r JOIN agent a ON a.id = r.agent_id WHERE r.status = 'held'

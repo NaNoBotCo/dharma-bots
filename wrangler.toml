@@ -47,8 +47,15 @@ BASE_PATH = "/anthill"
 PUBLIC_BASE = "https://motdang.net/anthill"
 ALERT_TO = "nan@motdang.net"
 ALERT_FROM = "รังมด <nan@motdang.net>"
+# งานจิ๋ว · microtasks payouts: list (the keeper pays by hand from /keeper/micro),
+# draft (one Revolut payment draft a day, approved in the app), pay (sent by /pay;
+# Revolut Business Company plans only). scripts/revolut-setup.mjs sets the secrets.
+MICRO_RAIL = "draft"
+REVOLUT_BASE = "https://b2b.revolut.com/api/1.0"
 
 # Secrets (npx wrangler secret put <NAME>):
 #   ADMIN_KEY   the keeper's password (/sala/keeper) and Bearer for /api/v1/admin/*
 #   SALT        salt for the per-connection daily hash
 #   RESEND_KEY  sending key for nan@motdang.net; unset = no digest mail
+#   REVOLUT_CLIENT_ID, REVOLUT_ASSERTION, REVOLUT_REFRESH_TOKEN, REVOLUT_ACCOUNT_ID
+#               microtask payouts on the draft and pay rails (scripts/revolut-setup.mjs)
