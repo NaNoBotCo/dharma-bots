@@ -272,10 +272,20 @@ for (const t of tasks) { const k = `${t.kind}${t.gold ? ' gold' : ''}`; count[k]
 console.log(out, tasks.length, count)
 
 if (load) {
-  for (let i = 0; i < tasks.length; i += 200) {
-    const r = await adm({ do: 'tasks', tasks: tasks.slice(i, i + 200) })
-    if (r.bad?.length) console.log('bad', i, r.bad.length)
+  // a batch the worker drops (a 500 on 2026-10-17, past its time on one call) goes again in halves
+  const send = async (batch, at, tries = 2) => {
+    try {
+      const r = await adm({ do: 'tasks', tasks: batch })
+      if (r.bad?.length) console.log('bad', at, r.bad.length)
+    } catch (e) {
+      if (!tries || batch.length < 2) throw e
+      console.log('again in halves', at, e.message.slice(0, 80))
+      const h = Math.ceil(batch.length / 2)
+      await send(batch.slice(0, h), at, tries - 1)
+      await send(batch.slice(h), at + h, tries - 1)
+    }
   }
+  for (let i = 0; i < tasks.length; i += 200) await send(tasks.slice(i, i + 200), i)
   for (const [kind, sources] of Object.entries(keep)) console.log(kind, await adm({ do: 'retire', kind, keep: sources, ...(keepGold[kind] ? { golds: keepGold[kind] } : {}) }))
   console.log('settled so far', done.answers.length)
   const open = {}
