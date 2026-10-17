@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { setup, solve } from './helpers.mjs'
 import { runPayouts, LIMITS } from '../src/micro.mjs'
+import { phoneKey, pagePhones, goldsFrom } from '../src/micro-gold.mjs'
 
 const ADMIN = { authorization: 'Bearer keeper-test' }
 const PLACE = (n) => ({ name: `Khao Soi ${n}`, address: 'Nimman Soi 7', lat: 18.8, lng: 98.97, page: 'https://motdang.net/cm/p/x.html' })
@@ -30,7 +31,7 @@ test('micro: closed, then payee first, then three bots agree two to one', async 
   assert.equal((await A.as('POST', '/api/v1/micro/payee', { body: { revtag: 'zzz999', name: 'Other' } })).status, 409, 'payee stays')
   const load = await admin(call, { do: 'tasks', tasks: [{ kind: 'same-place', source: 'p1|p2', show: { a: PLACE(1), b: PLACE(2) } },
     { kind: 'nope', show: {} }, { kind: 'same-place', source: 'p1|p2', show: {} }] })
-  assert.deepEqual(load.body, { added: 1, updated: 1, bad: [1] })
+  assert.deepEqual(load.body, { added: 1, updated: 1, reopened: 0, bad: [1] })
   const leases = []
   for (const b of [A, Bb, C]) {
     const r = await b.as('GET', '/api/v1/micro/next')
@@ -217,4 +218,69 @@ test('micro: the note price steps on its ladder by how much of the week was take
   await db.run("INSERT INTO micro_answer (task_id, agent_id, payee_id, ip_hash, answer, created_at, satang, outcome) VALUES (1, 1, 1, 'x', 'yes', '2026-10-18T00:00:00.000Z', 60000, 'agreed')")
   const r = (await admin(call, { do: 'note-price' })).body
   assert.ok(r.taken > 0.8 && r.baht === 5, JSON.stringify(r))
+})
+
+test('micro: a retired task opens again when it is loaded again; golds retire to the chosen mix', async () => {
+  const { call, db } = setup()
+  const T = (source, gold) => ({ kind: 'link-belongs', source, ...(gold ? { gold } : {}), show: { name: source, link: `http://${source}.example` } })
+  await admin(call, { do: 'tasks', tasks: [T('a'), T('b'), T('d1', 'dead'), T('d2', 'dead'), T('y1', 'yes')] })
+  const r = (await admin(call, { do: 'retire', kind: 'link-belongs', keep: ['a'], golds: ['d1', 'y1'] })).body
+  assert.deepEqual(r, { retired: 1, golds_retired: 1 })
+  const st = async (src) => (await db.get('SELECT status FROM micro_task WHERE source = ?', src)).status
+  assert.equal(await st('b'), 'void')
+  assert.equal(await st('d2'), 'void')
+  assert.equal((await admin(call, { do: 'retire', kind: 'link-belongs', keep: ['a'] })).body.golds_retired, undefined, 'golds stay unless named')
+  const back = (await admin(call, { do: 'tasks', tasks: [T('b'), T('d2', 'dead'), T('c')] })).body
+  assert.deepEqual(back, { added: 1, updated: 0, reopened: 2, bad: [] })
+  assert.equal(await st('b'), 'open')
+  assert.equal(await st('d2'), 'open')
+  // one that was answered and settled stays as it is
+  await db.run("UPDATE micro_task SET status = 'settled', got = 3, answer = 'yes' WHERE source = 'a'")
+  await admin(call, { do: 'tasks', tasks: [T('a')] })
+  assert.equal(await st('a'), 'settled')
+})
+
+test('micro: a bot that opens the link and says yes is caught by the "no" and "different" golds', async () => {
+  const { call, db } = setup()
+  await admin(call, { do: 'open' })
+  const A = await bot(call, 'Yes Man', '4.4.4.5')
+  await A.as('POST', '/api/v1/micro/payee', { body: { revtag: 'yesman1', name: 'Y Keeper' } })
+  const show = { name: 'Khao Soi Lamduan', phone: '+6653123456', link: 'http://lamduan.example' }
+  await admin(call, { do: 'tasks', tasks: Array.from({ length: 6 }, (_, i) => i % 2
+    ? { kind: 'link-belongs', source: `a${i}~b${i}`, gold: 'no', show }
+    : { kind: 'phone-matches', source: `c${i}#different`, gold: 'different', show }) })
+  for (let i = 0; i < LIMITS.freeze.goldsSeen; i++) {
+    const r = await A.as('GET', '/api/v1/micro/next')
+    await age(db)
+    assert.equal((await A.as('POST', '/api/v1/micro/answers', { body: { lease: r.body.lease, answer: 'yes' } })).status, 201)
+  }
+  assert.equal((await A.as('GET', '/api/v1/micro/mine')).body.frozen.why, 'golds')
+})
+
+test('micro: golds from sites — the phone on the page, two halves, directories left out', () => {
+  assert.equal(phoneKey('+6653106881'), '053106881')
+  assert.equal(phoneKey('+66 (0)81 234 5678'), '0812345678')
+  assert.equal(phoneKey('12345'), null)
+  assert.deepEqual(pagePhones('<a href="tel:+66 53 106 881">โทร</a> Tel. 081-234-5678 order 1234567890123 ๐๕๓-๒๒๒๓๓๓'), ['0812345678', '053222333', '053106881'])
+  const cands = Array.from({ length: 12 }, (_, i) => ({ id: 'r' + i, phone: `+66531000${String(i).padStart(2, '0')}`, link: `http://site${i}.example/`,
+    show: { name: 'Place ' + i }, words: ['word' + i] }))
+  const pages = new Map(cands.map((c, i) => [c.link, { phones: i === 11 ? ['053100011', '053999001', '053999002', '053999003']
+    : i === 10 ? ['053777777'] : [phoneKey(c.phone)] }]))
+  const dead = { 'link-belongs': [{ kind: 'link-belongs', source: 'x1', gold: 'dead', show: {} }, { kind: 'link-belongs', source: 'x2', gold: 'dead', show: {} }],
+    'phone-matches': [{ kind: 'phone-matches', source: 'x1', gold: 'dead', show: {} }] }
+  const g = goldsFrom(cands, pages, 9, dead)
+  assert.equal(g.found, 10, 'not the page with four phones, not the page without its own')
+  const by = (kind, gold) => g[kind].filter((t) => t.gold === gold)
+  assert.equal(by('link-belongs', 'yes').length, 3)
+  assert.equal(by('link-belongs', 'no').length, 3)
+  assert.equal(by('phone-matches', 'yes').length, 3)
+  assert.equal(by('phone-matches', 'different').length, 3)
+  assert.equal(by('link-belongs', 'dead').length, 2, 'dead fill what is left, as many as there are')
+  for (const t of by('phone-matches', 'different')) assert.ok(!pages.get(t.show.link).phones.includes(phoneKey(t.show.phone)), 'the phone shown is not on the page')
+  for (const t of by('link-belongs', 'no')) assert.notEqual(t.show.name, cands.find((c) => c.link === t.show.link).show.name, 'another place with that site')
+  const yesSites = new Set(by('link-belongs', 'yes').map((t) => t.show.link))
+  assert.ok(by('phone-matches', 'yes').every((t) => !yesSites.has(t.show.link)), 'a site is in one gold of each kind')
+  assert.ok(by('link-belongs', 'no').every((t) => !yesSites.has(t.show.link)))
+  assert.deepEqual(goldsFrom(cands, pages, 9, dead), g, 'the same golds tomorrow')
+  assert.deepEqual(goldsFrom(cands, new Map(), 9, dead)['phone-matches'].map((t) => t.gold), ['dead'], 'nothing read: only dead')
 })

@@ -1,18 +1,25 @@
 // micro-tasks.mjs — builds microtasks from the mot-dang working tree and,
 // with ADMIN_KEY set, loads them into the Anthill in batches.
 //
-//   node scripts/micro-tasks.mjs [out.json] [--per-kind 3000] [--load]
+//   node scripts/micro-tasks.mjs [out.json] [--per-kind 3000] [--abroad 1000] [--gold-fetch 300] [--load]
 //
 // With --load it first reads what the Anthill has settled: those records drop
 // out, their answers land in mot-dang/data/micro_answers.json, and kinds that
 // are nearly done sink. Each ordinary task gets a priority from its record
 // (featured or a landmark, imported in the last 30 days, few facts held);
-// the top --per-kind of each kind go out. Open tasks nobody has started that
-// fell out of the top are retired. launchd net.motdang.microtasks runs this daily.
+// the top --per-kind of each kind go out (--abroad of link-belongs and
+// phone-matches, the two people abroad can do), equal priorities in a fixed
+// order so the same ones stay out from day to day. Open tasks nobody has started
+// that fell out of the top are retired; loaded again later, they open again.
+// launchd net.motdang.microtasks runs this daily.
 //
 // Kinds and their gold tasks (known answers, about one in ten):
 //   link-belongs   own website, link checked ok        gold "dead": the domain no longer resolves
-//   phone-matches  phone + own website, link ok        gold "dead": same
+//                                                      gold "yes" / "no": the site, fetched, shows the record's phone
+//                                                      (src/micro-gold.mjs); "no" shows another record with it
+//   phone-matches  phone + own website, link ok        gold "dead": same; "yes" / "different" from the same pages
+//                  A link's status is data/linkhealth.json's, or the checker's cache/linkhealth/ verdict when the
+//                  morning's bounded check left it out of the file.
 //   same-place     two records within 40 m, names alike gold "different": one name, 3 km or more apart
 //   name-match     a record's Thai and English names
 //                                                      gold "yes": landmarks; gold "no": names swapped across records
@@ -22,12 +29,17 @@
 //                  asked only where there is a phone to call. Places with the most questions open go first.
 //                                                      gold: her own answers in data/curated/enrich.json (field)
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
+import { goldsFrom, pagePhones, phoneKey, phonesIn, stable } from '../src/micro-gold.mjs'
 
 const MD = new URL('../../mot-dang/', import.meta.url)
 const args = process.argv.slice(2)
 const out = args.find((a) => a.endsWith('.json')) || 'micro-tasks.json'
-const per = Number(args[args.indexOf('--per-kind') + 1]) || 3000
+const opt = (k, d) => args.includes(k) ? Number(args[args.indexOf(k) + 1]) || d : d
+const per = opt('--per-kind', 3000)
+const abroad = opt('--abroad', 1000)
+const PER = { 'link-belongs': abroad, 'phone-matches': abroad }
 const load = args.includes('--load')
 const API = process.env.ANTHILL || 'https://motdang.net/anthill/api/v1'
 const KEY = process.env.ADMIN_KEY || (() => {
@@ -75,37 +87,77 @@ for (const prov of readdirSync(new URL('docs/', MD)).filter((d) => /^[a-z]{2,6}$
   }
 }
 
+const norm = (s) => String(s || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+const STOP = new Set(['the', 'and', 'of', 'house', 'shop', 'home', 'cafe', 'coffee', 'restaurant', 'hotel', 'resort', 'chiang', 'mai', 'rai', 'co', 'ltd', 'thai', 'ร้าน', 'บ้าน', 'เชียงใหม่', 'เชียงราย'])
+const toks = (r) => new Set([r.name, r.nameTh, r.nameEn].flatMap((n) => norm(n).split(' ')).filter((t) => t.length > 2 && !STOP.has(t)))
 // names the build wrote from a category and a distance ("Parking · 130 m from …")
 const made = (r) => [r.name, r.nameTh, r.nameEn].some((n) => / · /.test(n || ''))
 const show = (r) => ({ name: r.name || '', name_th: r.nameTh || '', name_en: r.nameEn || '', address: r.address || '',
   lat: r.lat ?? null, lng: r.lng ?? null, page: r._page })
 const shuffle = (xs) => { for (let i = xs.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [xs[i], xs[j]] = [xs[j], xs[i]] } return xs }
 const take = (xs, n) => shuffle(xs).slice(0, n)
+const byPriority = (k) => (a, b) => b[k] - a[k] || stable(a.source) - stable(b.source)
 const tasks = []
-const keep = {}
+const keep = {}, keepGold = {}
 const push = (kind, ordinary, golds) => {
   const fresh = ordinary.filter((t) => !settledSrc.has(kind + ' ' + t.source))
   const need = kindNeed(kind, fresh.length)
   for (const t of fresh) t.priority = need + t._p
-  const o = shuffle(fresh).sort((a, b) => b.priority - a.priority).slice(0, per)
+  const o = fresh.sort(byPriority('priority')).slice(0, PER[kind] || per)
   for (const t of o) delete t._p
   keep[kind] = o.map((t) => t.source)
-  tasks.push(...o, ...take(golds, Math.max(10, Math.round(o.length / 9))).map((t) => { delete t._p; return t }))
+  // golds as a function: (how many) → the golds, all of them chosen
+  const g = typeof golds === 'function' ? golds(Math.max(10, Math.round(o.length / 9))) : take(golds, Math.max(10, Math.round(o.length / 9)))
+  if (typeof golds === 'function') keepGold[kind] = g.map((t) => t.source)
+  tasks.push(...o, ...g.map((t) => { delete t._p; return t }))
 }
 
-const status = (u) => health[u]?.status
+// check_links.py --max writes only what it checked or still holds fresh; the rest waits in its cache
+const LHC = new URL('cache/linkhealth/', MD)
+const status = (u) => {
+  if (health[u]) return health[u].status
+  try { return JSON.parse(readFileSync(new URL(createHash('sha1').update(u).digest('hex') + '.json', LHC), 'utf8')).status } catch { return undefined }
+}
 const withSite = recs.filter((r) => r.website)
+const okSite = withSite.filter((r) => status(r.website) === 'ok')
+const deadGold = (kind, extra) => withSite.filter((r) => status(r.website) === 'dns' && (kind === 'link-belongs' || r.phone))
+  .map((r) => ({ kind, source: r.id, gold: 'dead', show: { ...show(r), ...extra(r), link: r.website } }))
+const dead = { 'link-belongs': deadGold('link-belongs', () => ({})), 'phone-matches': deadGold('phone-matches', (r) => ({ phone: r.phone })) }
+
+// golds read from the sites themselves: a page fetched in the last 14 days, kept in a cache
+const PAGES = homedir() + '/Library/Caches/motdang-micro-gold-pages.json'
+const FRESH = 14 * DAY
+let pageCache = {}
+try { pageCache = JSON.parse(readFileSync(PAGES, 'utf8')) } catch {}
+const cands = okSite.filter((r) => r.phone && phonesIn(r.phone).length === 1 && !made(r))
+  .map((r) => ({ id: r.id, phone: r.phone, link: r.website, show: show(r), words: [...toks(r)] }))
+const UA = 'MotDangLinkCheck/1.0 (+https://motdang.net/reach.html; link health for a local directory)'
+async function readPage(link) {
+  const ac = new AbortController(), t = setTimeout(() => ac.abort(), 15000)
+  try {
+    const r = await fetch(/^https?:/i.test(link) ? link : 'http://' + link, { headers: { 'user-agent': UA, accept: 'text/html' }, redirect: 'follow', signal: ac.signal })
+    if (!r.ok) return { at: Date.now(), status: r.status, phones: [] }
+    const html = new TextDecoder().decode((await r.arrayBuffer()).slice(0, 1500000))
+    return { at: Date.now(), status: r.status, phones: pagePhones(html) }
+  } catch (e) { return { at: Date.now(), status: 'error', phones: [] } } finally { clearTimeout(t) }
+}
+const stale = cands.filter((c) => !(Date.now() - (pageCache[c.link]?.at || 0) < FRESH)).sort((a, b) => stable(a.id) - stable(b.id)).slice(0, opt('--gold-fetch', 300))
+for (let i = 0; i < stale.length; i += 8) {
+  await Promise.all(stale.slice(i, i + 8).map(async (c) => { pageCache[c.link] = await readPage(c.link) }))
+}
+if (stale.length) writeFileSync(PAGES, JSON.stringify(pageCache))
+const pages = new Map(Object.entries(pageCache).filter(([, v]) => Date.now() - v.at < FRESH && v.status === 200))
+const fromSites = (kind) => (n) => goldsFrom(cands, pages, n, dead)[kind]
+
 push('link-belongs',
-  withSite.filter((r) => status(r.website) === 'ok').map((r) => ({ kind: 'link-belongs', source: r.id, _p: recPriority(r), show: { ...show(r), link: r.website } })),
-  withSite.filter((r) => status(r.website) === 'dns').map((r) => ({ kind: 'link-belongs', source: r.id, gold: 'dead', show: { ...show(r), link: r.website } })))
+  okSite.map((r) => ({ kind: 'link-belongs', source: r.id, _p: recPriority(r), show: { ...show(r), link: r.website } })),
+  fromSites('link-belongs'))
 push('phone-matches',
-  withSite.filter((r) => r.phone && status(r.website) === 'ok').map((r) => ({ kind: 'phone-matches', source: r.id, _p: recPriority(r) + 5, show: { ...show(r), phone: r.phone, link: r.website } })),
-  withSite.filter((r) => r.phone && status(r.website) === 'dns').map((r) => ({ kind: 'phone-matches', source: r.id, gold: 'dead', show: { ...show(r), phone: r.phone, link: r.website } })))
+  okSite.filter((r) => r.phone).map((r) => ({ kind: 'phone-matches', source: r.id, _p: recPriority(r) + 5, show: { ...show(r), phone: r.phone, link: r.website } })),
+  fromSites('phone-matches'))
+console.log('pages read', stale.length, 'fresh', pages.size, 'phone on its own site', goldsFrom(cands, pages, 0, {}).found)
 
 // same-place: a 40 m neighbourhood on a grid
-const norm = (s) => String(s || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
-const STOP = new Set(['the', 'and', 'of', 'house', 'shop', 'home', 'cafe', 'coffee', 'restaurant', 'hotel', 'resort', 'chiang', 'mai', 'rai', 'co', 'ltd', 'thai', 'ร้าน', 'บ้าน', 'เชียงใหม่', 'เชียงราย'])
-const toks = (r) => new Set([r.name, r.nameTh, r.nameEn].flatMap((n) => norm(n).split(' ')).filter((t) => t.length > 2 && !STOP.has(t)))
 const alike = (a, b) => { const A = toks(a), B = toks(b); let n = 0; for (const t of A) if (B.has(t)) n++; return n / Math.max(1, Math.min(A.size, B.size)) }
 const metres = (a, b) => Math.hypot((a.lat - b.lat) * 111320, (a.lng - b.lng) * 111320 * Math.cos(a.lat * Math.PI / 180))
 const geo = recs.filter((r) => r.lat != null && r.lng != null && r.geoPrecision === 'exact' && !made(r))
@@ -205,7 +257,7 @@ golds.push({ kind: 'note', source: 'toilet:cm-osm-node-6351675891#cost', gold: '
   show: { name: 'Antique Market', name_th: 'ตลาดพระ คำเที่ยง', lat: 18.8093641, lng: 98.9958035, page: 'https://motdang.net/cm/p/antique-market-6351675891.html', ...TOILET } })
 // a third each: toilets, the parking and trades lists, every other list; a
 // share one group cannot fill goes to the others
-const top = (xs, n) => shuffle([...xs]).sort((x, y) => y._p - x._p).slice(0, n)
+const top = (xs, n) => [...xs].sort(byPriority('_p')).slice(0, n)
 const named = notes.filter((t) => t._named), rest = notes.filter((t) => !t._named)
 const third = Math.round(per / 3)
 const picked = [...top(loo, third), ...top(named, third)]
@@ -224,6 +276,9 @@ if (load) {
     const r = await adm({ do: 'tasks', tasks: tasks.slice(i, i + 200) })
     if (r.bad?.length) console.log('bad', i, r.bad.length)
   }
-  for (const [kind, sources] of Object.entries(keep)) console.log(kind, await adm({ do: 'retire', kind, keep: sources }))
-  console.log('settled so far', done.answers.length, JSON.stringify(counts))
+  for (const [kind, sources] of Object.entries(keep)) console.log(kind, await adm({ do: 'retire', kind, keep: sources, ...(keepGold[kind] ? { golds: keepGold[kind] } : {}) }))
+  console.log('settled so far', done.answers.length)
+  const open = {}
+  for (const c of (await adm({ do: 'settled', since: new Date().toISOString() })).counts) if (c.status === 'open') open[c.kind + (c.gold ? ' gold' : '')] = c.n
+  console.log('open now', JSON.stringify(open))
 }
