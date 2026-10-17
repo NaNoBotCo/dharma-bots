@@ -16,7 +16,8 @@
 // Kinds and their gold tasks (known answers, about one in ten):
 //   link-belongs   own website, link checked ok        gold "dead": the domain no longer resolves
 //                                                      gold "yes" / "no": the site, fetched, shows the record's phone
-//                                                      (src/micro-gold.mjs); "no" shows another record with it
+//                                                      (src/micro-gold.mjs); "no" shows another record with it.
+//                                                      Those records are settled "yes" by machine, not offered for pay.
 //   phone-matches  phone + own website, link ok        gold "dead": same; "yes" / "different" from the same pages
 //                  A link's status is data/linkhealth.json's, or the checker's cache/linkhealth/ verdict when the
 //                  morning's bounded check left it out of the file.
@@ -31,7 +32,7 @@
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
-import { goldsFrom, pagePhones, phoneKey, phonesIn, stable } from '../src/micro-gold.mjs'
+import { goldsFrom, machineAnswers, pagePhones, phonesIn, stable } from '../src/micro-gold.mjs'
 
 const MD = new URL('../../mot-dang/', import.meta.url)
 const args = process.argv.slice(2)
@@ -147,6 +148,13 @@ for (let i = 0; i < stale.length; i += 8) {
 }
 if (stale.length) writeFileSync(PAGES, JSON.stringify(pageCache))
 const pages = new Map(Object.entries(pageCache).filter(([, v]) => Date.now() - v.at < FRESH && v.status === 200))
+// what the pages settle is answered here, unpaid (Nan 2026-10-17: "everything here could be automated")
+let byMachine = 0
+for (const a of machineAnswers(cands, pages, new Date().toISOString())) {
+  if (settledSrc.has(a.kind + ' ' + a.source)) continue
+  done.answers.push(a); settledSrc.add(a.kind + ' ' + a.source); byMachine++
+}
+if (load && byMachine) writeFileSync(ANSWERS, JSON.stringify({ generated: new Date().toISOString(), note: 'Settled microtask answers from the Anthill: the majority of three bots on different payees; by "machine", read from the place\'s own site.', answers: done.answers }, null, 1))
 const fromSites = (kind) => (n) => goldsFrom(cands, pages, n, dead)[kind]
 
 push('link-belongs',
@@ -155,7 +163,7 @@ push('link-belongs',
 push('phone-matches',
   okSite.filter((r) => r.phone).map((r) => ({ kind: 'phone-matches', source: r.id, _p: recPriority(r) + 5, show: { ...show(r), phone: r.phone, link: r.website } })),
   fromSites('phone-matches'))
-console.log('pages read', stale.length, 'fresh', pages.size, 'phone on its own site', goldsFrom(cands, pages, 0, {}).found)
+console.log('pages read', stale.length, 'fresh', pages.size, 'phone on its own site', goldsFrom(cands, pages, 0, {}).found, 'settled by machine', byMachine)
 
 // same-place: a 40 m neighbourhood on a grid
 const alike = (a, b) => { const A = toks(a), B = toks(b); let n = 0; for (const t of A) if (B.has(t)) n++; return n / Math.max(1, Math.min(A.size, B.size)) }
