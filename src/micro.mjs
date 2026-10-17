@@ -440,37 +440,46 @@ export async function runNotePrice(db, now, { force = false } = {}) {
 // ── the keeper ─────────────────────────────────────────────────────────────────
 
 /** Load tasks: [{kind, source, show, gold?, priority?}]. A kind+source already
- *  here keeps its answers; while open, it takes the new priority and show. */
+ *  here keeps its answers; while open, it takes the new priority and show. One
+ *  that retire() put away unanswered opens again when it is loaded again. */
 export async function loadTasks(db, tasks, now) {
-  let added = 0, updated = 0
+  let added = 0, updated = 0, reopened = 0
   const bad = []
   for (const [i, x] of (Array.isArray(tasks) ? tasks : []).entries()) {
     const k = KINDS[x?.kind]
     if (!k || !x.show || typeof x.show !== 'object' || (x.gold != null && !choicesOf(x.kind, x.show).includes(x.gold)) || x.gold === UNSURE) { bad.push(i); continue }
     const source = String(x.source || randHex(8))
     const pr = Math.max(0, Math.min(1000, Math.round(Number(x.priority) || 0)))
-    const had = await db.get('SELECT id, status FROM micro_task WHERE kind = ? AND source = ?', x.kind, source)
+    const had = await db.get('SELECT id, status, got, gold FROM micro_task WHERE kind = ? AND source = ?', x.kind, source)
     if (had) {
-      if (had.status === 'open') { await db.run('UPDATE micro_task SET priority = ?, payload = ? WHERE id = ?', pr, JSON.stringify(x.show), had.id); updated++ }
+      const back = had.status === 'void' && had.got === 0 && had.gold === (x.gold ?? null)
+      if (had.status === 'open' || back) {
+        await db.run("UPDATE micro_task SET status = 'open', settled_at = NULL, priority = ?, payload = ? WHERE id = ?", pr, JSON.stringify(x.show), had.id)
+        back ? reopened++ : updated++
+      }
       continue
     }
     await db.run('INSERT INTO micro_task (kind, tier, payload, source, gold, priority, created_at) VALUES (?,?,?,?,?,?,?)',
       x.kind, k.tier, JSON.stringify(x.show), source, x.gold ?? null, pr, iso(now))
     added++
   }
-  return { added, updated, bad }
+  return { added, updated, reopened, bad }
 }
 
 /** Retire open ordinary tasks of a kind that nobody has answered and the site no
- *  longer needs (their source is not in `keep`). */
-export async function retire(db, kind, keep, now) {
-  if (!KINDS[kind] || !Array.isArray(keep)) return { error: 'kind and keep: [sources]' }
-  const want = new Set(keep.map(String))
-  const open = await db.all(`SELECT t.id, t.source FROM micro_task t WHERE t.kind = ? AND t.status = 'open' AND t.gold IS NULL AND t.got = 0
-    AND NOT EXISTS (SELECT 1 FROM micro_lease l WHERE l.task_id = t.id AND l.answered = 0 AND l.expires_at > ?)`, kind, iso(now))
-  let n = 0
-  for (const t of open) if (!want.has(t.source)) { await db.run("UPDATE micro_task SET status = 'void', settled_at = ? WHERE id = ?", iso(now), t.id); n++ }
-  return { retired: n }
+ *  longer needs (their source is not in `keep`). With `golds`, open golds of the
+ *  kind not in it retire too, so the known answers keep the mix the loader chose. */
+export async function retire(db, kind, keep, now, golds = null) {
+  if (!KINDS[kind] || !Array.isArray(keep) || (golds != null && !Array.isArray(golds))) return { error: 'kind and keep: [sources], golds: [sources]' }
+  const off = async (want, gold) => {
+    const open = await db.all(`SELECT t.id, t.source FROM micro_task t WHERE t.kind = ? AND t.status = 'open' AND t.gold IS ${gold ? 'NOT ' : ''}NULL AND t.got = 0
+      AND NOT EXISTS (SELECT 1 FROM micro_lease l WHERE l.task_id = t.id AND l.answered = 0 AND l.expires_at > ?)`, kind, iso(now))
+    let n = 0
+    for (const t of open) if (!want.has(t.source)) { await db.run("UPDATE micro_task SET status = 'void', settled_at = ? WHERE id = ?", iso(now), t.id); n++ }
+    return n
+  }
+  const retired = await off(new Set(keep.map(String)), false)
+  return golds ? { retired, golds_retired: await off(new Set(golds.map(String)), true) } : { retired }
 }
 
 /** Settled answers, for motdang.net's own records. */
@@ -498,7 +507,7 @@ export async function admin(db, env, b, now, log) {
   }
   if (d === 'note-price') return [200, await runNotePrice(db, now, { force: true })]
   if (d === 'tasks') return [200, await loadTasks(db, b.tasks, now)]
-  if (d === 'retire') { const r = await retire(db, b.kind, b.keep, now); return [r.error ? 400 : 200, r] }
+  if (d === 'retire') { const r = await retire(db, b.kind, b.keep, now, b.golds); return [r.error ? 400 : 200, r] }
   if (d === 'settled') return [200, await settled(db, b.since)]
   if (d === 'release' || d === 'void' || d === 'payee-reset') {
     const a = await db.get('SELECT id FROM agent WHERE name = ?', String(b.name || ''))
