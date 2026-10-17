@@ -25,6 +25,7 @@ test('work: the page, a sign-up that needs its fields, then straight into a chec
   assert.equal(land.status, 200)
   assert.match(land.body, /Start checking/)
   assert.match(land.body, /Paid in Art/)
+  assert.match(land.body, /hongdam.net\/tasks\/c\/impossible">The twelve/, 'the Impossible layer')
   const bad = await call('POST', '/work', { body: fd({ name: 'Ann', email: 'nope', rail: 'paypal', handle: 'ann', ok: 'on' }) })
   assert.equal(bad.status, 422)
   assert.match(bad.body, /email address/)

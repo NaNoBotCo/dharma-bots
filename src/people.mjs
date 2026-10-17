@@ -31,6 +31,8 @@ export const LIM = {
   joinsPerIpDay: 3,
   activeToStepUp: 3,   // people who checked that week, before a rate may rise
 }
+// the Impossible layer on the Hongdam task board, Nan 2026-10-17: "we'll pay you with prayer, nam dang, gratitude, and $100"
+export const IMPOSSIBLE = 'https://hongdam.net/tasks/c/impossible'
 const KINDS_ALL = ['link-belongs', 'phone-matches', 'same-place', 'name-match']
 const KINDS_NO_THAI = ['link-belongs', 'phone-matches']
 
@@ -290,6 +292,8 @@ ${back ? `<p><a class="go" href="${full}/work/${back.tok}/next">Next check, ${es
 <div class="cards">
 <div class="card"><h2>Checks</h2><p>Open a shop’s website and say whether it is the shop’s own, or whether the phone number on it matches ours. <span class="price">${money(r.check)}</span> a check; <span class="price">${money(r.tap)}</span> a quick one if you read Thai. Any hour, up to ${money(r.cap * LIM.share)} a day.</p>
 <a class="go" href="${back ? `${full}/work/${back.tok}/next` : '#start'}">Start checking</a></div>
+<div class="card"><h2>Impossible</h2><p>Twelve problems Chiang Mai has lived with for lifetimes, from traffic-light timing to reading Lanna palm-leaf manuscripts. Open to anyone. The first work that passes a task’s test is paid with prayer, nam daeng, gratitude and <span class="price">$100</span>.</p>
+<a class="go alt" href="${IMPOSSIBLE}">The twelve</a></div>
 <div class="card"><h2>Account reviews</h2><p>You grow audiences for a living. Read one of our accounts and write the ten changes you would make, each with its reason. <span class="price">${money(r.review)}</span> a review, ${r.reviews} a month.</p>
 <a class="go alt" href="${back ? `${full}/work/${back.tok}/review` : `${full}/work?gig=review#start`}">Write a review</a></div>
 <div class="card"><h2>Art</h2><p>Painters, illustrators, photographers, musicians, writers: trade your work for a portfolio page with Gold for a year and your name on each piece. You keep the copyright.</p>
