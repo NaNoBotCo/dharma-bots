@@ -50,7 +50,7 @@ test('work: three people agree, are paid in cents, and the Monday payout skips t
     const page = (await x.as('GET', '~/next')).body
     assert.match(page, /Open the link/, 'a person who does not read Thai gets a link check')
     assert.doesNotMatch(page, /metres apart/)
-    assert.match(page, /15¢/)
+    assert.match(page, /\b5¢/)
     x.lease = leaseOf(page)
   }
   const look = await P[0].as('POST', '~/answer', { body: fd({ lease: P[0].lease, answer: 'yes' }) })
@@ -58,7 +58,7 @@ test('work: three people agree, are paid in cents, and the Monday payout skips t
   await age(db)
   for (const [i, x] of P.entries()) await x.as('POST', '~/answer', { body: fd({ lease: x.lease, answer: i < 2 ? 'yes' : 'no' }) })
   const rows = await db.all("SELECT a.outcome, a.satang, l.cur FROM micro_answer a JOIN micro_lease l ON l.task_id = a.task_id AND l.agent_id = a.agent_id ORDER BY a.id")
-  assert.deepEqual(rows.map((r) => [r.outcome, r.satang, r.cur]), [['agreed', 15, 'usd'], ['agreed', 15, 'usd'], ['disagreed', 0, 'usd']])
+  assert.deepEqual(rows.map((r) => [r.outcome, r.satang, r.cur]), [['agreed', 5, 'usd'], ['agreed', 5, 'usd'], ['disagreed', 0, 'usd']])
 
   // the baht rail never sees people
   await db.run('UPDATE micro_answer SET payable_at = ?, reveal_at = ?', '2000-01-01T00:00:00Z', '2000-01-01T00:00:00Z')
@@ -94,10 +94,10 @@ test('work: Thai readers get Thai kinds; the day share stops a person', async ()
   await db.run('UPDATE micro_bot SET answers = 100')
   const page = (await T.as('GET', '~/next')).body
   assert.match(page, /metres apart/)
-  assert.match(page, /5¢/)
+  assert.match(page, /\b3¢/)
   const N = await person(call, 'No Thai', '6.6.6.6')
   assert.match((await N.as('GET', '~/next')).body, /Nothing for you/)
-  await db.run("UPDATE micro_setting SET v = '20' WHERE k = 'usd_cap_cents_day'")
+  await db.run("UPDATE micro_setting SET v = '10' WHERE k = 'usd_cap_cents_day'")
   await admin(call, { do: 'tasks', tasks: [{ kind: 'link-belongs', source: 's9', show: SHOP(9) }] })
   assert.match((await N.as('GET', '~/next')).body, /share|spoken for/)
 })
@@ -131,7 +131,7 @@ test('work: reviews, ten lines, places a month, and a no before payday', async (
   assert.match(ok.body, /Review sent/)
   assert.doesNotMatch((await A.as('GET', '~')).body, /Write a review/, 'one a month each')
   const j = await db.get('SELECT * FROM person_job')
-  assert.equal(j.cents, 5000)
+  assert.equal(j.cents, 2000)
   await db.run("UPDATE person_job SET payable_at = '2000-01-01T00:00:00Z'")
   assert.deepEqual(await payWeek(db, env, new Date('2026-10-19T04:00:00Z'), 'x'), { payouts: 1 })
 })
@@ -147,5 +147,5 @@ test('work: Shoup on Mondays — no rise without people, a step down when the mo
   db.exec('PRAGMA foreign_keys = OFF')
   await db.run("INSERT INTO micro_lease (id, task_id, agent_id, payee_id, satang, day, issued_at, expires_at, answered, cur) VALUES ('ml_x', 1, 1, 1, 9000, '2026-10-22', '', '', 1, 'usd')")
   await stepWeek(db, new Date('2026-10-26T04:00:00Z'))
-  assert.equal((await rates(db)).check, 12)
+  assert.equal((await rates(db)).check, 3)
 })

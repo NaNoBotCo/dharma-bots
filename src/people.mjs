@@ -19,8 +19,9 @@ import { sha256hex, randHex } from './door.mjs'
 import { bkkDate } from './site.mjs'
 import * as MT from './micro.mjs'
 
-// cents; a rate is a rung on its ladder, kept in micro_setting
-export const LADDER = { tap: [3, 4, 5, 6, 8, 10], check: [10, 12, 15, 20, 25, 30], review: [3000, 4000, 5000, 7500, 10000] }
+// cents; a rate is a rung on its ladder, kept in micro_setting. Nan 2026-10-17, on 5¢ · 15¢ · $50:
+// "these tasks should actually pay less. everything here could be automated, would bankrupt me."
+export const LADDER = { tap: [1, 2, 3, 4, 5], check: [2, 3, 5, 6, 8, 10], review: [1000, 1500, 2000, 3000, 5000] }
 export const LIM = {
   share: 0.4,          // of the day's money, one person
   gold: 0.25,          // known-answer share after probation

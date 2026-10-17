@@ -6,7 +6,8 @@
 //                 "no"         another record shown with that site
 //   phone-matches "yes"        the same site, the record's phone
 //                 "different"  the same site, another record's phone that is not on the page
-// "dead" golds stay too, about a third of each kind's golds.
+// "dead" golds stay too, about a third of each kind's golds. The same records are
+// settled here by machine (machineAnswers) and are not offered as paid tasks.
 
 const TH = '๐๑๒๓๔๕๖๗๘๙'
 const RUN = /(?<![\d+])(?:\+?\s?66[\s.\-]*(?:\(0\)[\s.\-]*)?|0)\d(?:[\s.\-()]{0,2}\d){7,8}(?!\d)/g
@@ -43,11 +44,20 @@ const order = (xs, key) => [...xs].sort((a, b) => stable(key(a)) - stable(key(b)
  * pages: Map link → { phones: [keys] } for pages fetched lately.
  * n: golds wanted per kind; dead: the "dead" golds on hand, per kind.
  */
+const ownPhone = (pages) => (c) => {
+  const p = pages.get(c.link), k = phoneKey(c.phone)
+  return p && k && p.phones.length <= 3 && p.phones.includes(k)
+}
+
+/** What a machine settles, so nobody is paid for it: a record whose own site
+ *  shows its phone has its own link and that phone. */
+export function machineAnswers(cands, pages, at) {
+  return cands.filter(ownPhone(pages)).flatMap((c) => ['link-belongs', 'phone-matches']
+    .map((kind) => ({ kind, source: c.id, answer: 'yes', settled_at: at, by: 'machine' })))
+}
+
 export function goldsFrom(cands, pages, n, dead = {}) {
-  const found = order(cands.filter((c) => {
-    const p = pages.get(c.link), k = phoneKey(c.phone)
-    return p && k && p.phones.length <= 3 && p.phones.includes(k)
-  }), (c) => c.id)
+  const found = order(cands.filter(ownPhone(pages)), (c) => c.id)
   const third = Math.max(1, Math.round(n / 3))
   // two halves, so a site is in one gold of each kind at most:
   // A gives link "yes" and phone "different", B gives link "no" and phone "yes"

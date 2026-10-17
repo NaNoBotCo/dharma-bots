@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { setup, solve } from './helpers.mjs'
 import { runPayouts, LIMITS } from '../src/micro.mjs'
-import { phoneKey, pagePhones, goldsFrom } from '../src/micro-gold.mjs'
+import { phoneKey, pagePhones, goldsFrom, machineAnswers } from '../src/micro-gold.mjs'
 
 const ADMIN = { authorization: 'Bearer keeper-test' }
 const PLACE = (n) => ({ name: `Khao Soi ${n}`, address: 'Nimman Soi 7', lat: 18.8, lng: 98.97, page: 'https://motdang.net/cm/p/x.html' })
@@ -283,4 +283,8 @@ test('micro: golds from sites — the phone on the page, two halves, directories
   assert.ok(by('link-belongs', 'no').every((t) => !yesSites.has(t.show.link)))
   assert.deepEqual(goldsFrom(cands, pages, 9, dead), g, 'the same golds tomorrow')
   assert.deepEqual(goldsFrom(cands, new Map(), 9, dead)['phone-matches'].map((t) => t.gold), ['dead'], 'nothing read: only dead')
+  const m = machineAnswers(cands, pages, '2026-10-17T00:00:00Z')
+  assert.equal(m.length, 20, 'the ten found, settled yes for both kinds, unpaid')
+  assert.ok(m.every((x) => x.answer === 'yes' && x.by === 'machine'))
+  assert.ok(!m.some((x) => x.source === 'r10' || x.source === 'r11'), 'not the page without its phone, not the directory')
 })
