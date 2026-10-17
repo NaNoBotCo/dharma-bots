@@ -7,6 +7,7 @@ import { d1Db } from './db.mjs'
 import { tick } from './news.mjs'
 import { runDigest } from './digest.mjs'
 import { runPayouts, runNotePrice } from './micro.mjs'
+import { stepWeek, payWeek } from './people.mjs'
 import card from './card.png'
 
 const handle = createHandler((env) => d1Db(env.DB))
@@ -36,5 +37,6 @@ export default {
     ctx.waitUntil(tick(db, env, now).then(() => runDigest(db, env, now)).catch((e) => console.error(e)))
     ctx.waitUntil(runPayouts(db, env, now).catch((e) => console.error(e)))
     ctx.waitUntil(runNotePrice(db, now).catch((e) => console.error(e)))
+    ctx.waitUntil(stepWeek(db, now).then(() => payWeek(db, env, now, env.PUBLIC_BASE || 'https://motdang.net/anthill')).catch((e) => console.error(e)))
   },
 }

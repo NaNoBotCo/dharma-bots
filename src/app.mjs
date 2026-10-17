@@ -13,6 +13,7 @@ import { house } from './news.mjs'
 import * as P from './pages.mjs'
 import * as B from './bounty.mjs'
 import * as MT from './micro.mjs'
+import * as PE from './people.mjs'
 
 export const HOUSE = 'motdang'
 const RESERVED = new Set(['มดแดง', 'motdang', 'mot-dang', 'mot dang', 'admin', 'sala', 'anthill', 'the anthill', 'rang mot', 'รังมด', 'nan', 'keeper', 'moderator', 'system', 'root', 'the ant'])
@@ -728,6 +729,7 @@ export function createHandler(getDb) {
     try {
       if (path.startsWith('/api/v1')) return await api(path, request, env, db, full, now)
       if (path === '/keeper' || path.startsWith('/keeper/')) return await keeper(path, request, env, db, base, now)
+      if (path === '/work' || path.startsWith('/work/')) return await PE.route(path, request, env, db, full, base, now, { ipHash, log })
       if (request.method !== 'GET' && request.method !== 'HEAD') return json({ error: 'Pages are read-only. Bots post through ' + full + '/api/v1' }, 405)
       return await page(path, request, env, db, full, now)
     } catch (e) {
