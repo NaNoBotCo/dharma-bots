@@ -88,7 +88,7 @@ const setSetting = (db, k, v) => db.run('INSERT INTO micro_setting (k, v) VALUES
 
 // Desk tasks (tap, check) and notes are counted against their own daily money.
 async function spentToday(db, day, now, payeeId = null, notes = false) {
-  const q = `SELECT COALESCE(SUM(satang), 0) n, COUNT(*) c FROM micro_lease WHERE day = ? AND (answered = 1 OR expires_at > ?)
+  const q = `SELECT COALESCE(SUM(satang), 0) n, COUNT(*) c FROM micro_lease WHERE day = ? AND (answered = 1 OR expires_at > ?) AND cur = 'thb'
     AND COALESCE(tier, '') ${notes ? '=' : '!='} 'note'${payeeId ? ' AND payee_id = ?' : ''}`
   return db.get(q, day, iso(now), ...(payeeId ? [payeeId] : []))
 }
@@ -173,7 +173,10 @@ const activeLeases = `(SELECT COUNT(*) FROM micro_lease l WHERE l.task_id = t.id
 const notMine = `NOT EXISTS (SELECT 1 FROM micro_answer x WHERE x.task_id = t.id AND (x.agent_id = ? OR x.payee_id = ? OR x.ip_hash = ?))
   AND NOT EXISTS (SELECT 1 FROM micro_lease y WHERE y.task_id = t.id AND y.answered = 0 AND y.expires_at > ? AND (y.agent_id = ? OR y.payee_id = ? OR y.ip_hash = ?))`
 
-export async function next({ db, a, ip, now, want = '' }) {
+/** `person` (people.mjs): someone outside Thailand at a desk, paid in US cents. Their caps are
+ *  counted in people.mjs; here they get taps and checks of the kinds they can read, at
+ *  `person.cents[tier]`, with `person.gold` the share of known-answer tasks. */
+export async function next({ db, a, ip, now, want = '', person = null }) {
   const s = await settings(db)
   if (!s.open) return [503, { error: 'งานจิ๋วปิดอยู่ · Microtasks are closed for now.', open: false }]
   const bot = await botRow(db, a.id)
@@ -185,7 +188,7 @@ export async function next({ db, a, ip, now, want = '' }) {
   if (open >= LIMITS.openLeases) return [429, { error: `${LIMITS.openLeases} tasks at a time. Answer one first.`, retry_after: 30 }]
   const day = bkkDate(now)
   const rest = { retry_after: Math.max(60, Math.round((Date.parse(day + 'T00:00:00+07:00') + 86400000 - now.getTime()) / 1000)) }
-  if ((await spentToday(db, day, now, payee.id)).c + (await spentToday(db, day, now, payee.id, true)).c >= LIMITS.perPayeeDay)
+  if (!person && (await spentToday(db, day, now, payee.id)).c + (await spentToday(db, day, now, payee.id, true)).c >= LIMITS.perPayeeDay)
     return [429, { error: 'Your payee has done today’s share. Back after midnight, Bangkok time.', ...rest }]
   // which money has room: desk tasks (tap, check) and notes each have their own
   const room = async (notes) => {
@@ -194,13 +197,14 @@ export async function next({ db, a, ip, now, want = '' }) {
     if ((await spentToday(db, day, now, null, notes)).n + price > cap) return 'cap'
     return ''
   }
-  const desk = want === 'note' ? 'off' : await room(false)
-  const note = want === 'desk' ? 'off' : await room(true)
+  const desk = person ? '' : want === 'note' ? 'off' : await room(false)
+  const note = person ? 'off' : want === 'desk' ? 'off' : await room(true)
   if (desk && note) return [429, { error: [desk, note].includes('share') ? 'Your payee has done today’s share. Back after midnight, Bangkok time.'
     : 'Today’s money is spoken for. Back after midnight, Bangkok time.', ...rest }]
-  const tierSql = desk ? "AND t.tier = 'note'" : note ? "AND t.tier != 'note'" : ''
+  const tierSql = person ? `AND t.tier != 'note' AND t.kind IN (${person.kinds.filter((k) => KINDS[k] && !KINDS[k].own).map((k) => `'${k}'`).join(',') || "''"})`
+    : desk ? "AND t.tier = 'note'" : note ? "AND t.tier != 'note'" : ''
 
-  const goldP = bot.answers < LIMITS.probation ? LIMITS.probationGold : LIMITS.gold
+  const goldP = bot.answers < LIMITS.probation ? LIMITS.probationGold : person ? person.gold : LIMITS.gold
   const args = [a.id, payee.id, ip, iso(now), a.id, payee.id, ip]
   const pickGold = () => db.get(`SELECT t.* FROM micro_task t WHERE t.status = 'open' AND t.gold IS NOT NULL ${tierSql} AND ${notMine} ORDER BY RANDOM() LIMIT 1`, ...args)
   const pickOne = () => db.get(`SELECT t.* FROM micro_task t WHERE t.status = 'open' AND t.gold IS NULL ${tierSql}
@@ -211,11 +215,11 @@ export async function next({ db, a, ip, now, want = '' }) {
   if (!t && desk && desk !== 'off') return [429, { error: full(desk), ...rest }]
   if (!t) return [200, { task: null, note: 'Nothing for you right now.', retry_after: 600 }]
   const k = KINDS[t.kind]
-  const satang = isNote(t.tier) ? s.note : TIER[t.tier].satang
+  const satang = person ? person.cents[t.tier] : isNote(t.tier) ? s.note : TIER[t.tier].satang
   const until = plus(now, k.leaseS || LIMITS.leaseS)
   const id = 'ml_' + randHex(16)
-  await db.run('INSERT INTO micro_lease (id, task_id, agent_id, payee_id, ip_hash, satang, day, issued_at, expires_at, tier) VALUES (?,?,?,?,?,?,?,?,?,?)',
-    id, t.id, a.id, payee.id, ip, satang, day, iso(now), iso(until), t.tier)
+  await db.run('INSERT INTO micro_lease (id, task_id, agent_id, payee_id, ip_hash, satang, day, issued_at, expires_at, tier, cur) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
+    id, t.id, a.id, payee.id, ip, satang, day, iso(now), iso(until), t.tier, person ? 'usd' : 'thb')
   const show = JSON.parse(t.payload)
   return [200, { lease: id, expires_at: iso(until), kind: t.kind, tier: t.tier, baht: baht(satang),
     ask_th: k.own && show.ask_th ? show.ask_th : k.ask_th, ask_en: k.own && show.ask_en ? show.ask_en : k.ask_en, choices: choicesOf(t.kind, show), show,
@@ -343,8 +347,8 @@ export async function ledger(db, now = new Date()) {
   const s = await settings(db)
   const bots = await db.all(`SELECT a.name, a.born_day, COUNT(*) agreed, SUM(m.satang) satang,
       SUM(CASE WHEN p.status = 'sent' THEN m.satang ELSE 0 END) paid
-    FROM micro_answer m JOIN agent a ON a.id = m.agent_id LEFT JOIN micro_payout p ON p.id = m.payout_id
-    WHERE m.outcome = 'agreed' AND m.reveal_at <= ? GROUP BY m.agent_id ORDER BY satang DESC LIMIT 50`, iso(now))
+    FROM micro_answer m JOIN agent a ON a.id = m.agent_id JOIN micro_payee y ON y.id = m.payee_id LEFT JOIN micro_payout p ON p.id = m.payout_id
+    WHERE m.outcome = 'agreed' AND m.reveal_at <= ? AND y.state != 'abroad' GROUP BY m.agent_id ORDER BY satang DESC LIMIT 50`, iso(now))
   const c = async (sql, ...p) => (await db.get(sql, ...p)).n
   return {
     open: s.open, cap_baht: baht(s.cap), today_baht: baht((await spentToday(db, bkkDate(now), now)).n),
@@ -369,7 +373,7 @@ export async function runPayouts(db, env, now, log = async () => {}) {
   const r = RV.rail(env)
   const owed = await db.all(`SELECT m.payee_id, SUM(m.satang) satang FROM micro_answer m JOIN micro_bot b ON b.agent_id = m.agent_id
     JOIN micro_payee y ON y.id = m.payee_id
-    WHERE m.outcome = 'agreed' AND m.payout_id IS NULL AND m.payable_at <= ? AND b.frozen_at IS NULL AND y.state != 'refused'
+    WHERE m.outcome = 'agreed' AND m.payout_id IS NULL AND m.payable_at <= ? AND b.frozen_at IS NULL AND y.state NOT IN ('refused', 'abroad')
     GROUP BY m.payee_id HAVING SUM(m.satang) >= ?`, iso(now), LIMITS.minPayoutSatang)
   for (const o of owed) {
     const res = await db.run('INSERT INTO micro_payout (payee_id, satang, rail, created_at) VALUES (?,?,?,?)', o.payee_id, o.satang, r, iso(now))
