@@ -36,7 +36,7 @@ test('micro: closed, then payee first, then three bots agree two to one', async 
   for (const b of [A, Bb, C]) {
     const r = await b.as('GET', '/api/v1/micro/next')
     assert.equal(r.status, 200)
-    assert.equal(r.body.baht, 0.1)
+    assert.equal(r.body.baht, 0.01)
     assert.deepEqual(r.body.choices, ['same', 'different', 'cannot_tell'])
     leases.push(r.body.lease)
   }
@@ -50,7 +50,7 @@ test('micro: closed, then payee first, then three bots agree two to one', async 
   assert.equal(t.status, 'settled')
   assert.equal(t.answer, 'same')
   const ma = (await A.as('GET', '/api/v1/micro/mine')).body
-  assert.equal(ma.baht.holding, 0.1)
+  assert.equal(ma.baht.holding, 0.01)
   assert.equal(ma.answers[0].outcome, 'agreed')
   const mc = (await C.as('GET', '/api/v1/micro/mine')).body
   assert.equal(mc.answers[0].outcome, 'disagreed')
@@ -59,7 +59,7 @@ test('micro: closed, then payee first, then three bots agree two to one', async 
   assert.equal(led.bots.length, 2)
   assert.ok(!JSON.stringify(led).includes('aaa111'), 'no Revtag in public')
   const page = (await call('GET', '/micro')).body
-  assert.ok(page.includes('฿0.10') && page.includes('฿0.25'))
+  assert.ok(page.includes('฿0.01') && page.includes('฿0.03'))
 })
 
 test('micro: bots sharing a payee or a connection never answer the same task', async () => {
@@ -83,7 +83,7 @@ test('micro: missed golds freeze a bot; gold outcomes stay hidden for a while', 
   await admin(call, { do: 'tasks', tasks: Array.from({ length: 6 }, (_, i) => ({ kind: 'link-belongs', source: 'g' + i, gold: 'dead', show: { link: `http://gone${i}.example` } })) })
   for (let i = 0; i < LIMITS.freeze.goldsSeen; i++) {
     const r = await A.as('GET', '/api/v1/micro/next')
-    assert.equal(r.body.baht, 0.25)
+    assert.equal(r.body.baht, 0.03)
     await age(db)
     assert.equal((await A.as('POST', '/api/v1/micro/answers', { body: { lease: r.body.lease, answer: 'yes' } })).status, 201)
   }
@@ -98,13 +98,13 @@ test('micro: missed golds freeze a bot; gold outcomes stay hidden for a while', 
 test('micro: the payee share and the daily cap', async () => {
   const { call } = setup()
   await admin(call, { do: 'open' })
-  await admin(call, { do: 'cap', baht: 1 })
+  await admin(call, { do: 'cap', baht: 0.1 })
   await admin(call, { do: 'tasks', tasks: Array.from({ length: 5 }, (_, i) => ({ kind: 'phone-matches', source: 'c' + i, show: { phone: '+6653000000', link: 'http://x.example' } })) })
   const A = await bot(call, 'Capper', '5.5.5.5')
   await A.as('POST', '/api/v1/micro/payee', { body: { revtag: 'cap01', name: 'Cap Keeper' } })
   assert.equal((await A.as('GET', '/api/v1/micro/next')).status, 200)
   const r = await A.as('GET', '/api/v1/micro/next')
-  assert.equal(r.status, 429, '฿0.50 would pass 40% of ฿1')
+  assert.equal(r.status, 429, '฿0.06 would pass 40% of ฿0.10')
   assert.ok(r.body.retry_after > 0)
 })
 

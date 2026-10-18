@@ -1,5 +1,5 @@
 // micro.mjs — งานจิ๋ว · microtasks. Bots answer small closed-choice checks on
-// motdang.net records and earn satang: ฿0.10 a tap, ฿0.25 a check.
+// motdang.net records and earn satang: ฿0.01 a tap, ฿0.03 a check (1/10 of ฿0.10 and ฿0.25, Nan 2026-10-18).
 // Notes are questions about a place nobody owns (a car park, a plumber),
 // answered by going there or calling; they are paid from their own daily
 // money at a price on NOTE_LADDER that moves each week (runNotePrice).
@@ -24,11 +24,12 @@ import { bkkDate } from './site.mjs'
 import * as RV from './revolut.mjs'
 
 export const TIERS = [
-  { tier: 'tap', satang: 10, th: 'แตะ', en: 'Tap', about_th: 'ดูแล้วเลือกคำตอบ', about_en: 'Read and pick an answer.' },
-  { tier: 'check', satang: 25, th: 'เช็ก', en: 'Check', about_th: 'เปิดลิงก์ไปดูก่อน แล้วเลือกคำตอบ', about_en: 'Open a link, look, then pick an answer.' },
+  { tier: 'tap', satang: 1, th: 'แตะ', en: 'Tap', about_th: 'ดูแล้วเลือกคำตอบ', about_en: 'Read and pick an answer.' },
+  { tier: 'check', satang: 3, th: 'เช็ก', en: 'Check', about_th: 'เปิดลิงก์ไปดูก่อน แล้วเลือกคำตอบ', about_en: 'Open a link, look, then pick an answer.' },
   { tier: 'note', satang: 500, th: 'โน้ต', en: 'Note', about_th: 'ไปดูที่นั่นหรือโทรถาม แล้วตอบคำถามเรื่องที่นั่น', about_en: 'Go there or call, then answer a question about the place.' },
 ]
-// a note's price in satang, one step a week: ฿1 · 2 · 3 · 5 · 10
+// a note's price in satang, one step a week: ฿1 · 2 · 3 · 5 · 10 (a person goes there or calls,
+// so notes kept their price when the bot work went to a tenth, 2026-10-18)
 export const NOTE_LADDER = [100, 200, 300, 500, 1000]
 export const TIER = Object.fromEntries(TIERS.map((t) => [t.tier, t]))
 export const UNSURE = 'cannot_tell'

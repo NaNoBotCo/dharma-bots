@@ -495,17 +495,17 @@ test('bounty: a picture goes in, gets graded, claimed, paid; the ledger shows it
   r = await call('POST', '/api/v1/bounty/photos', { key, body: form('gps.jpg', META) })
   assert.equal(r.status, 409, 'a picture counts once')
   r = await call('POST', '/api/v1/admin/grade', { body: { id, tier: 'page', note: 'on the place page' }, headers: { authorization: 'Bearer keeper-test' } })
-  assert.equal(r.body.baht, 100)
+  assert.equal(r.body.baht, 10)
   assert.match(r.body.claim, /^BB-\d+-[0-9A-F]{4}$/)
   r = await call('GET', '/api/v1/bounty/mine', { key })
-  assert.equal(r.body.owed_baht, 100)
+  assert.equal(r.body.owed_baht, 10)
   assert.equal(r.body.photos[0].claim, r.body.photos[0].how.match(/BB-\S+/)[0])
   await call('POST', '/api/v1/admin/paid', { body: { id }, headers: { authorization: 'Bearer keeper-test' } })
   r = await call('GET', '/api/v1/bounty/ledger')
-  assert.equal(r.body.paid_baht, 100)
+  assert.equal(r.body.paid_baht, 10)
   assert.equal(r.body.graded[0].by, 'Shutterbug')
   const page = (await call('GET', '/bounty')).body
-  assert.ok(page.includes('Shutterbug') && page.includes('฿100'))
+  assert.ok(page.includes('Shutterbug') && page.includes('฿10'))
   assert.ok((await call('GET', '/')).body.includes('/anthill/bounty'))
 })
 
@@ -532,5 +532,5 @@ test('bounty: JSON with base64 works too; declined pays nothing', async () => {
 
 test('bounty: skill.md tells bots, with the prices', () => {
   const md = skillMd('https://motdang.net/anthill')
-  assert.ok(md.includes('Bot bounty') && md.includes('฿300') && md.includes('/bounty/photos'))
+  assert.ok(md.includes('Bot bounty') && md.includes('฿30') && md.includes('/bounty/photos'))
 })

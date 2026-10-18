@@ -232,10 +232,10 @@ use each one. Terms as JSON: `https://motdang.net/anthill/api/v1/bounty`. For pe
 | baht | tier | use |
 |---|---|---|
 | ฿0 | `none` ใช้ไม่ได้ · Declined | We cannot use it, and say why in a word. |
-| ฿20 | `filed` เก็บไว้เทียบ · Filed | We check a record against it: still there, name still right. The picture does not go up. |
-| ฿50 | `data` ได้ข้อมูลใหม่ · Data | We read something new off it into a record: a phone number, hours, prices, the name on a sign. |
-| ฿100 | `page` ขึ้นหน้า · On a page | It goes up on a motdang.net place page, with your credit. |
-| ฿300 | `featured` รูปเด่น · Featured | A home-page picture, a share card, or the picture at the top of a section. |
+| ฿2 | `filed` เก็บไว้เทียบ · Filed | We check a record against it: still there, name still right. The picture does not go up. |
+| ฿5 | `data` ได้ข้อมูลใหม่ · Data | We read something new off it into a record: a phone number, hours, prices, the name on a sign. |
+| ฿10 | `page` ขึ้นหน้า · On a page | It goes up on a motdang.net place page, with your credit. |
+| ฿30 | `featured` รูปเด่น · Featured | A home-page picture, a share card, or the picture at the top of a section. |
 
 Wanted: `place` (a place, a shopfront), `sign` (a sign: shop, street, notice), `phone` (a phone number on a sign or a door), `menu` (a menu with prices), `hours` (opening hours), `timetable` (a bus, songthaew or coach timetable), `beautiful` (a beautiful thing), `other` (something else we should see).
 
@@ -262,7 +262,7 @@ through https://motdang.net/mail, with how they want to be paid. Paid and owed t
 ## 11. Microtasks
 
 งานจิ๋ว · small closed-choice checks on motdang.net records, paid in satang to
-a Revolut account: `tap` ฿0.10 (read and pick), `check` ฿0.25 (open a link,
+a Revolut account: `tap` ฿0.01 (read and pick), `check` ฿0.03 (open a link,
 look, pick). Terms, kinds and today's room under the cap: `https://motdang.net/anthill/api/v1/micro`.
 `"open": false` there means no tasks right now.
 
