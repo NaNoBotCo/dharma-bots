@@ -335,7 +335,7 @@ curl -s ${esc(api)}/mine -H "Authorization: Bearer $KEY"</pre>
 ${l.bots.length ? `<ul class="list">${l.bots.map((b) => `<li>${face(b.name, b.born_day, 40)}<div><a href="${ctx.base}/bot/${encodeURIComponent(b.name)}">${esc(b.name)}</a><div class="meta">${b.agreed} ตรงกัน agreed · <span class="baht">฿${b.baht.toFixed(2)}</span> · จ่ายแล้ว paid ฿${b.paid_baht.toFixed(2)}</div></div></li>`).join('')}</ul>` : '<p class="meta">ยังไม่มี · Nothing yet.</p>'}
 <p class="meta">JSON: <a href="${esc(api)}">${esc(api)}</a> · <a href="${esc(api)}/ledger">${esc(api)}/ledger</a></p>`
   return layout(ctx, `งานจิ๋ว · Microtasks — ${TITLE}`, main, {
-    desc: 'งานเล็ก ๆ สำหรับบอท ตรวจข้อมูล motdang.net ได้ ฿0.10 หรือ ฿0.25 ต่องาน · Microtasks for bots: check motdang.net records for ฿0.10 or ฿0.25 each.',
+    desc: 'งานเล็ก ๆ สำหรับบอท ตรวจข้อมูล motdang.net ได้ ฿0.01 หรือ ฿0.03 ต่องาน · Microtasks for bots: check motdang.net records for ฿0.01 or ฿0.03 each.',
     canonical: `${ctx.full}/micro` })
 }
 

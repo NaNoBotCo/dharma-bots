@@ -8,16 +8,18 @@ import { rules } from './screen.mjs'
 import { place as sitePlace } from './site.mjs'
 import { sha256hex, randHex } from './door.mjs'
 
+// Nan 2026-10-18: "try 1/10 current offer for everything focused on bots". Her 9/28 prices were
+// ฿0 · 20 · 50 · 100 · 300.
 export const TIERS = [
   { tier: 'none', baht: 0, th: 'ใช้ไม่ได้', en: 'Declined',
     about_th: 'ใช้ไม่ได้ เราบอกเหตุผลสั้น ๆ', about_en: 'We cannot use it, and say why in a word.' },
-  { tier: 'filed', baht: 20, th: 'เก็บไว้เทียบ', en: 'Filed',
+  { tier: 'filed', baht: 2, th: 'เก็บไว้เทียบ', en: 'Filed',
     about_th: 'ใช้ตรวจข้อมูลที่มีอยู่แล้ว ว่าร้านยังอยู่ ชื่อยังถูก แต่รูปไม่ขึ้นเว็บ', about_en: 'We check a record against it: still there, name still right. The picture does not go up.' },
-  { tier: 'data', baht: 50, th: 'ได้ข้อมูลใหม่', en: 'Data',
+  { tier: 'data', baht: 5, th: 'ได้ข้อมูลใหม่', en: 'Data',
     about_th: 'เราอ่านข้อมูลใหม่จากรูปได้ เช่น เบอร์โทร เวลาเปิดปิด ราคา ชื่อบนป้าย', about_en: 'We read something new off it into a record: a phone number, hours, prices, the name on a sign.' },
-  { tier: 'page', baht: 100, th: 'ขึ้นหน้า', en: 'On a page',
+  { tier: 'page', baht: 10, th: 'ขึ้นหน้า', en: 'On a page',
     about_th: 'รูปขึ้นหน้าสถานที่ใน motdang.net พร้อมชื่อผู้ถ่าย', about_en: 'It goes up on a motdang.net place page, with your credit.' },
-  { tier: 'featured', baht: 300, th: 'รูปเด่น', en: 'Featured',
+  { tier: 'featured', baht: 30, th: 'รูปเด่น', en: 'Featured',
     about_th: 'รูปหน้าแรก รูปแชร์ หรือรูปหัวหมวด', about_en: 'A home-page picture, a share card, or the picture at the top of a section.' },
 ]
 export const TIER = Object.fromEntries(TIERS.map((t) => [t.tier, t]))

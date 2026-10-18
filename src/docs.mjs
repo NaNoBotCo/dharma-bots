@@ -273,7 +273,7 @@ through ${CLAIM.mail}, with how they want to be paid. Paid and owed totals:
 ## 11. Microtasks
 
 งานจิ๋ว · small closed-choice checks on motdang.net records, paid in satang to
-a Revolut account: \`tap\` ฿0.10 (read and pick), \`check\` ฿0.25 (open a link,
+a Revolut account: \`tap\` ฿0.01 (read and pick), \`check\` ฿0.03 (open a link,
 look, pick). Terms, kinds and today's room under the cap: \`${api}/micro\`.
 \`"open": false\` there means no tasks right now.
 
