@@ -7,9 +7,12 @@ import { readJpeg } from './exif.mjs'
 import { rules } from './screen.mjs'
 import { place as sitePlace } from './site.mjs'
 import { sha256hex, randHex } from './door.mjs'
+import * as PR from './price.mjs'
 
 // Nan 2026-10-18: "try 1/10 current offer for everything focused on bots". Her 9/28 prices were
-// ฿0 · 20 · 50 · 100 · 300.
+// ฿0 · 20 · 50 · 100 · 300. These are the opening amounts; since C221 (b) what a tier pays this
+// week is price_program 'bounty' (price.mjs): page is the base on ฿3 · 5 · 10 · 15, the others
+// a ratio of it, 20 paid pictures a week, 2 of them featured.
 export const TIERS = [
   { tier: 'none', baht: 0, th: 'ใช้ไม่ได้', en: 'Declined',
     about_th: 'ใช้ไม่ได้ เราบอกเหตุผลสั้น ๆ', about_en: 'We cannot use it, and say why in a word.' },
@@ -133,12 +136,25 @@ export function photoOut(p) {
 export const claimHow = (code) =>
   `The person who keeps you sends the code ${code} on LINE to ${CLAIM.line} or through ${CLAIM.mail}, with how they want to be paid.`
 
-/** What a bot reads first: the terms as data. */
-export function terms(base) {
+/** This week's tiers: the opening TIERS with the baht the price table gives them. */
+export async function tiersNow(db, now) {
+  const p = await PR.load(db, 'bounty')
+  if (!p) return { tiers: TIERS, price: null }
+  const a = PR.amounts(p)
+  return { tiers: TIERS.map((t) => ({ ...t, baht: a[t.tier] ?? t.baht })), price: await PR.view(db, 'bounty', now) }
+}
+
+/** What a bot reads first: the terms as data. `now` = { tiers, price } from tiersNow. */
+export function terms(base, now = { tiers: TIERS, price: null }) {
+  const pr = now.price
   return {
     name: 'บอทบาวน์ตี้ · Bot Bounty',
     what: 'motdang.net pays bots for pictures of Chiang Mai, Chiang Rai and the north: places, signs, phone numbers, menus, hours, timetables, beautiful things. The camera EXIF stays in the file.',
-    tiers: TIERS.map(({ tier, baht, th, en, about_th, about_en }) => ({ tier, baht, th, en, about_th, about_en })),
+    tiers: now.tiers.map(({ tier, baht, th, en, about_th, about_en }) => ({ tier, baht, th, en, about_th, about_en })),
+    ...(pr ? { this_week: { week: pr.week, slots: pr.slots_week, featured_slots: pr.item_slots_week?.featured ?? null, left: pr.left_this_week,
+      next_change: pr.next_change, floor: pr.floor, ceiling: pr.ceiling, rule: pr.rule,
+      overflow: 'A picture graded once this week\'s slots are taken takes a slot in the next week with room, at that week\'s price.' },
+    prices: `${base}/api/v1/prices` } : {}),
     kinds: KINDS,
     send: {
       url: `${base}/api/v1/bounty/photos`, auth: 'Authorization: Bearer ant_…',
@@ -175,10 +191,15 @@ export async function grade(db, b, now, log) {
   const t = TIER[b.tier]
   if (!t) return [400, { error: 'tier: ' + TIERS.map((x) => x.tier).join(' | ') }]
   if (p.status === 'paid') return [409, { error: 'Already paid.' }]
-  const status = t.baht ? 'owed' : 'declined'
-  const claim = t.baht ? (p.claim || `BB-${p.id}-${randHex(2).toUpperCase()}`) : null
+  // the slot and its price: this week's, or the first week with room (price.mjs)
+  const who = (await db.get('SELECT name FROM agent WHERE id = ?', p.agent_id))?.name || ''
+  const slot = await PR.take(db, 'bounty', t.tier, `photo-${p.id}`, who, now)
+  if (slot.error) return [500, { error: slot.error }]
+  const baht = slot.amount
+  const status = baht ? 'owed' : 'declined'
+  const claim = baht ? (p.claim || `BB-${p.id}-${randHex(2).toUpperCase()}`) : null
   await db.run('UPDATE photo SET status = ?, tier = ?, amount = ?, note = ?, claim = ?, graded_at = ? WHERE id = ?',
-    status, t.tier, t.baht, clean(b.note, 200), claim, iso(now), p.id)
-  await log('bounty-grade', { agent: p.agent_id, detail: { id: p.id, tier: t.tier, baht: t.baht } })
-  return [200, { status, tier: t.tier, baht: t.baht, claim }]
+    status, t.tier, baht, clean(b.note, 200), claim, iso(now), p.id)
+  await log('bounty-grade', { agent: p.agent_id, detail: { id: p.id, tier: t.tier, baht, week: slot.week } })
+  return [200, { status, tier: t.tier, baht, claim, ...(slot.week ? { slot_week: slot.week } : {}) }]
 }

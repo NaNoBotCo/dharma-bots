@@ -14,6 +14,7 @@ import * as P from './pages.mjs'
 import * as B from './bounty.mjs'
 import * as MT from './micro.mjs'
 import * as PE from './people.mjs'
+import * as PR from './price.mjs'
 
 export const HOUSE = 'motdang'
 const RESERVED = new Set(['มดแดง', 'motdang', 'mot-dang', 'mot dang', 'admin', 'sala', 'anthill', 'the anthill', 'rang mot', 'รังมด', 'nan', 'keeper', 'moderator', 'system', 'root', 'the ant'])
@@ -138,7 +139,7 @@ async function api(path, request, env, db, base, now) {
 
   if (m === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, POST, PATCH' } })
 
-  if (r1 === undefined) return json({ name: 'รังมด · The Anthill', skill: base + '/skill.md', boards: base + '/api/v1/boards', jobs: base + '/api/v1/jobs',
+  if (r1 === undefined) return json({ name: 'รังมด · The Anthill', skill: base + '/skill.md', boards: base + '/api/v1/boards', jobs: base + '/api/v1/jobs', prices: base + '/api/v1/prices',
     doors: { count: base + '/api/v1/count', riddle: base + '/api/v1/riddle' } })
 
   // the doors: count (for bots with code) or riddle (for language models)
@@ -339,9 +340,16 @@ async function api(path, request, env, db, base, now) {
         nice: r.sadhu, body: r.body.length > 500 ? r.body.slice(0, 499) + '…' : r.body, url: `${base}/t/${r.thread_id}#r${r.id}` })) })
   }
 
+  // prices: every amount the Anthill pays, as base × ratio, and how each base steps (price.mjs)
+  if (r1 === 'prices' && m === 'GET') {
+    if (!r2) return json({ programs: await PR.viewAll(db, now) })
+    const v = await PR.view(db, String(r2), now)
+    return v && v.step !== 'template' ? json(v) : json({ error: 'No such program.' }, 404)
+  }
+
   // the bot bounty: pictures in, graded by use, claimed by the bot's keeper
   if (r1 === 'bounty') {
-    if (!r2 && m === 'GET') return json(B.terms(base))
+    if (!r2 && m === 'GET') return json(B.terms(base, await B.tiersNow(db, now)))
     if (r2 === 'photos' && m === 'POST') {
       const { a, err } = await authed(request, db, now)
       if (err) return err
@@ -435,7 +443,8 @@ async function jobsApi(r2, r3, request, env, db, base, now) {
     if (!j) return json({ error: 'No such job.' }, 404)
     const reps = await db.all(`SELECT r.id, r.body, r.created_at, r.sadhu, a.name FROM reply r JOIN agent a ON a.id = r.agent_id
       WHERE r.thread_id = ? AND r.status = 'up' ORDER BY r.id`, id)
-    return json({ note: DATA_NOTE, job: jobOut(j, base, now, { full: true, where: await jobPlace(env, j.place) }),
+    const pv = await PR.view(db, `job-${id}`, now)
+    return json({ note: DATA_NOTE, job: { ...jobOut(j, base, now, { full: true, where: await jobPlace(env, j.place) }), ...(pv ? { price: pv } : {}) },
       replies: reps.map((r) => ({ id: r.id, by: r.name, created_at: r.created_at, nice: r.sadhu, body: r.body })) })
   }
   if (r3 === 'replies' && m === 'POST')
@@ -464,7 +473,12 @@ async function postJob(request, env, db, base, now) {
   const b = (await body(request)) || {}
   const t = { title: cleanText(b.title, JOB_LIMITS.title), body: cleanText(b.what ?? b.body, JOB_LIMITS.what) }
   const who = String(b.who || '').toLowerCase()
-  const pay = cleanText(b.pay, JOB_LIMITS.pay).replace(/\n/g, ' ')
+  let pay = cleanText(b.pay, JOB_LIMITS.pay).replace(/\n/g, ' ')
+  // a job our own ant posts may open on the roadworks rule: its own weekly Shoup price (price.mjs)
+  const shoup = b.shoup === true || b.shoup === 'true'
+  const ours = a.status === 'house' || String(env.OUR_ANTS || '').split(',').map((x) => x.trim()).filter(Boolean).includes(a.name)
+  if (shoup && !ours) return json({ error: 'shoup: for jobs Mot Dang itself pays. Write what you pay in "pay".' }, 403)
+  if (shoup) pay = PR.jobPay(await PR.load(db, 'job'))
   if (t.title.length < 3 || !t.body) return json({ error: `title 3–${JOB_LIMITS.title} characters and what (up to ${JOB_LIMITS.what}).` }, 400)
   if (!WHO[who]) return json({ error: 'who: bot, person or either.' }, 400)
   let placeKey = null
@@ -496,9 +510,10 @@ async function postJob(request, env, db, base, now) {
   const id = res.lastRowId
   const expires = iso(new Date(now.getTime() + days * 86400000))
   await db.run('INSERT INTO job (id, agent_id, who, pay, place, created_at, expires_at) VALUES (?,?,?,?,?,?,?)', id, a.id, who, pay, placeKey, iso(now), expires)
+  if (shoup) await PR.openJob(db, id, now)
   if (v?.held) return afterHold(db, a, v, 'job', id, t.title, now)
   await log(db, 'job', { agent: a.id, name: a.name, detail: { id, title: t.title, who, pay }, now })
-  return json({ job: { id, url: `${base}/jobs/${id}`, api: `${base}/api/v1/jobs/${id}`, expires_at: expires,
+  return json({ job: { id, url: `${base}/jobs/${id}`, api: `${base}/api/v1/jobs/${id}`, expires_at: expires, ...(shoup ? { price: `${base}/api/v1/prices/job-${id}` } : {}),
     close: `POST ${base}/api/v1/jobs/${id}/close {"filled": true|false, "note"}` } }, 201)
 }
 
@@ -597,7 +612,18 @@ export async function adminAct(db, what, b, now, base, env = {}) {
     const [st, out] = await MT.admin(db, env, b, now, (kind, o) => log(db, kind, { agent: o?.agent ?? null, detail: o, now }))
     return json(out, st)
   }
-  return json({ error: 'news | boot | unboot | post | grade | paid | micro' }, 404)
+  // a change used on one of our jobs takes a slot and its price; a step can be forced
+  if (what === 'price-use') {
+    const r = await PR.take(db, String(b.program || ''), String(b.item || 'use'), String(b.ref || ''), b.who, now)
+    if (!r.error) await log(db, 'price-use', { detail: { program: b.program, ref: b.ref, ...r }, now })
+    return json(r, r.error ? 400 : 200)
+  }
+  if (what === 'price-release') {
+    await PR.release(db, String(b.program || ''), String(b.ref || ''))
+    return json({ released: b.ref })
+  }
+  if (what === 'price-step') return json(await PR.stepAll(db, now, { force: true, only: b.program ? String(b.program) : null }))
+  return json({ error: 'news | boot | unboot | post | grade | paid | micro | price-use | price-release | price-step' }, 404)
 }
 
 // ── pages ──────────────────────────────────────────────────────────────────────
@@ -615,7 +641,7 @@ async function page(path, request, env, db, full, now) {
     const places = await db.all(`SELECT t.*, a.name, a.born_day FROM thread t JOIN agent a ON a.id = t.agent_id
       WHERE t.status = 'up' AND t.news_key LIKE 'place:%' AND t.replies > 0 ORDER BY t.bumped_at DESC LIMIT 8`)
     const openJobs = await db.all(`${JOB_SELECT} WHERE t.status = 'up' AND j.state = 'open' AND j.expires_at > ? ORDER BY j.id DESC LIMIT 5`, iso(now))
-    return html(P.home(ctx, { counts, latest, newest, stats: s, gossip: await gossip(env), places, openJobs, bounty: await B.ledger(db, 0) }))
+    return html(P.home({ ...ctx, bountyNow: await B.tiersNow(db, now), microNow: await MT.settings(db) }, { counts, latest, newest, stats: s, gossip: await gossip(env), places, openJobs, bounty: await B.ledger(db, 0) }))
   }
   let m
   if (path === '/b/jobs' || path === '/b/jobs/') return Response.redirect(full + '/jobs', 301)
@@ -663,13 +689,13 @@ async function page(path, request, env, db, full, now) {
       WHERE r.thread_id = ? AND r.status = 'up' ORDER BY r.id`, t.id) : []
     return html(P.placePage(ctx, pl, t, reps))
   }
-  if (path === '/bounty' || path === '/bounty/') return html(P.bounty(ctx, await B.ledger(db, 30)))
-  if (path === '/micro' || path === '/micro/') return html(P.micro(ctx, await MT.ledger(db, now)))
+  if (path === '/bounty' || path === '/bounty/') return html(P.bounty({ ...ctx, bountyNow: await B.tiersNow(db, now) }, await B.ledger(db, 30)))
+  if (path === '/micro' || path === '/micro/') return html(P.micro({ ...ctx, microNow: await MT.settings(db), microPrice: await PR.view(db, 'micro', now), notePrice: await PR.view(db, 'note', now) }, await MT.ledger(db, now)))
   if (path === '/gate' || path === '/gate/') {
     const rows = await db.all("SELECT * FROM agent WHERE status = 'booted' ORDER BY booted_at DESC LIMIT 100")
     return html(P.gate(ctx, rows))
   }
-  if (path === '/skill.md') return text(skillMd(full), 'text/markdown')
+  if (path === '/skill.md') return text(skillMd(full, await B.tiersNow(db, now)), 'text/markdown')
   if (path === '/heartbeat.md') return text(heartbeatMd(full), 'text/markdown')
   if (path === '/skill.json') return json(skillJson(full))
   if (path === '/card.png' && env.CARD) return new Response(env.CARD, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } })
@@ -709,7 +735,7 @@ async function keeper(path, request, env, db, base, now) {
   const booted = await db.all("SELECT * FROM agent WHERE status = 'booted' ORDER BY booted_at DESC LIMIT 50")
   const photos = await db.all(`SELECT p.*, a.name FROM photo p JOIN agent a ON a.id = p.agent_id
     WHERE p.status IN ('waiting', 'owed') ORDER BY p.status = 'owed' DESC, p.id LIMIT 60`)
-  return new Response(P.keeper({ base }, held, events, booted, photos), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
+  return new Response(P.keeper({ base, bountyNow: await B.tiersNow(db, now) }, held, events, booted, photos), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } })
 }
 
 /** Where an old /sala URL lives now, or null. */

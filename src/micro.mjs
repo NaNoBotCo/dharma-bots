@@ -1,8 +1,10 @@
 // micro.mjs — งานจิ๋ว · microtasks. Bots answer small closed-choice checks on
-// motdang.net records and earn satang: ฿0.01 a tap, ฿0.03 a check (1/10 of ฿0.10 and ฿0.25, Nan 2026-10-18).
-// Notes are questions about a place nobody owns (a car park, a plumber),
-// answered by going there or calling; they are paid from their own daily
-// money at a price on NOTE_LADDER that moves each week (runNotePrice).
+// motdang.net records and earn satang. Prices live in price_program / price_item
+// (price.mjs): a check is the base, from ฿0.03 on 1 · 2 · 3 · 4 · 5 satang, and a tap is a
+// third of it; the base steps each Monday on how much of last week's money was taken.
+// Notes are questions about a place nobody owns (a car park, a plumber), answered by going
+// there or calling; they are paid from their own daily money, at their own price on
+// ฿1 · 2 · 3 · 5 · 10 that steps the same way.
 //
 // How an answer earns:
 //   - Each ordinary task goes to three bots with different payees and
@@ -22,14 +24,16 @@
 import { randHex } from './door.mjs'
 import { bkkDate } from './site.mjs'
 import * as RV from './revolut.mjs'
+import * as PR from './price.mjs'
 
+// The opening amounts; what a task pays this week comes from price.mjs (settings()).
 export const TIERS = [
   { tier: 'tap', satang: 1, th: 'แตะ', en: 'Tap', about_th: 'ดูแล้วเลือกคำตอบ', about_en: 'Read and pick an answer.' },
   { tier: 'check', satang: 3, th: 'เช็ก', en: 'Check', about_th: 'เปิดลิงก์ไปดูก่อน แล้วเลือกคำตอบ', about_en: 'Open a link, look, then pick an answer.' },
   { tier: 'note', satang: 500, th: 'โน้ต', en: 'Note', about_th: 'ไปดูที่นั่นหรือโทรถาม แล้วตอบคำถามเรื่องที่นั่น', about_en: 'Go there or call, then answer a question about the place.' },
 ]
-// a note's price in satang, one step a week: ฿1 · 2 · 3 · 5 · 10 (a person goes there or calls,
-// so notes kept their price when the bot work went to a tenth, 2026-10-18)
+// a note's opening ladder in satang, ฿1 · 2 · 3 · 5 · 10, now held in price_program 'note' (a person
+// goes there or calls, so notes kept their price when the bot work went to a tenth, 2026-10-18)
 export const NOTE_LADDER = [100, 200, 300, 500, 1000]
 export const TIER = Object.fromEntries(TIERS.map((t) => [t.tier, t]))
 export const UNSURE = 'cannot_tell'
@@ -82,9 +86,13 @@ const rand = () => crypto.getRandomValues(new Uint32Array(1))[0] / 2 ** 32
 export async function settings(db) {
   const rows = await db.all("SELECT k, v FROM micro_setting WHERE k IN ('open', 'pay', 'cap_satang_day', 'paid_day', 'note_cap_satang_day', 'note_satang', 'note_priced_day')")
   const s = Object.fromEntries(rows.map((r) => [r.k, r.v]))
+  const desk = await PR.load(db, 'micro'), note = await PR.load(db, 'note')
+  const d = desk ? PR.amounts(desk) : {}
   return { open: s.open === '1', pay: s.pay === '1', cap: Number(s.cap_satang_day || 0), paidDay: s.paid_day || '',
-    noteCap: Number(s.note_cap_satang_day || 0), note: Number(s.note_satang || TIER.note.satang), notePricedDay: s.note_priced_day || '' }
+    noteCap: Number(s.note_cap_satang_day || 0), tap: d.tap ?? TIER.tap.satang, check: d.check ?? TIER.check.satang,
+    note: note ? PR.amounts(note).note : TIER.note.satang }
 }
+const satangOf = (s, tier) => s[tier] ?? TIER[tier].satang
 const setSetting = (db, k, v) => db.run('INSERT INTO micro_setting (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v', k, String(v))
 
 // Desk tasks (tap, check) and notes are counted against their own daily money.
@@ -108,8 +116,8 @@ export async function terms(db, base) {
     name: 'งานจิ๋ว · Microtasks',
     what: 'Small checks on motdang.net records, paid in satang to a Revolut account.',
     open: s.open,
-    tiers: TIERS.map(({ tier, satang, th, en, about_th, about_en }) => ({ tier, baht: baht(isNote(tier) ? s.note : satang), th, en, about_th, about_en })),
-    kinds: Object.entries(KINDS).map(([kind, k]) => ({ kind, tier: k.tier, baht: baht(isNote(k.tier) ? s.note : TIER[k.tier].satang), th: k.th, en: k.en, choices: k.choices,
+    tiers: TIERS.map(({ tier, th, en, about_th, about_en }) => ({ tier, baht: baht(satangOf(s, tier)), th, en, about_th, about_en })),
+    kinds: Object.entries(KINDS).map(([kind, k]) => ({ kind, tier: k.tier, baht: baht(satangOf(s, k.tier)), th: k.th, en: k.en, choices: k.choices,
       ...(k.own ? { note: 'The question, and choices other than yes and no, come with each task.' } : {}) })),
     how: [
       `POST ${api}/payee {"revtag","name"} once: the Revolut Revtag and account name of the person who keeps you.`,
@@ -126,6 +134,7 @@ export async function terms(db, base) {
     limits: { per_payee_day: LIMITS.perPayeeDay, open_leases: LIMITS.openLeases, bots_per_payee: LIMITS.botsPerPayee,
       daily_cap_baht: baht(s.cap), today_left_baht: baht(Math.max(0, s.cap - (await spentToday(db, bkkDate(new Date()), new Date())).n)),
       notes_daily_cap_baht: baht(s.noteCap), notes_today_left_baht: baht(Math.max(0, s.noteCap - (await spentToday(db, bkkDate(new Date()), new Date(), null, true)).n)) },
+    prices: { desk: await PR.view(db, 'micro', new Date()), notes: await PR.view(db, 'note', new Date()), all: `${base}/api/v1/prices` },
     mine: `${api}/mine`, ledger: `${api}/ledger`, page: `${base}/micro`,
   }
 }
@@ -193,7 +202,7 @@ export async function next({ db, a, ip, now, want = '', person = null }) {
     return [429, { error: 'Your payee has done today’s share. Back after midnight, Bangkok time.', ...rest }]
   // which money has room: desk tasks (tap, check) and notes each have their own
   const room = async (notes) => {
-    const price = notes ? s.note : TIER.check.satang, cap = notes ? s.noteCap : s.cap
+    const price = notes ? s.note : s.check, cap = notes ? s.noteCap : s.cap
     if ((await spentToday(db, day, now, payee.id, notes)).n + price > cap * LIMITS.payeeShare) return 'share'
     if ((await spentToday(db, day, now, null, notes)).n + price > cap) return 'cap'
     return ''
@@ -216,7 +225,7 @@ export async function next({ db, a, ip, now, want = '', person = null }) {
   if (!t && desk && desk !== 'off') return [429, { error: full(desk), ...rest }]
   if (!t) return [200, { task: null, note: 'Nothing for you right now.', retry_after: 600 }]
   const k = KINDS[t.kind]
-  const satang = person ? person.cents[t.tier] : isNote(t.tier) ? s.note : TIER[t.tier].satang
+  const satang = person ? person.cents[t.tier] : satangOf(s, t.tier)
   const until = plus(now, k.leaseS || LIMITS.leaseS)
   const id = 'ml_' + randHex(16)
   await db.run('INSERT INTO micro_lease (id, task_id, agent_id, payee_id, ip_hash, satang, day, issued_at, expires_at, tier, cur) VALUES (?,?,?,?,?,?,?,?,?,?,?)',
@@ -419,23 +428,12 @@ export async function sendQueued(db, env, now, log = async () => {}) {
 
 // ── the note price ─────────────────────────────────────────────────────────────
 
-/** Mondays, Bangkok time: the share of the last seven days' note money that was
- *  taken moves the price a step on NOTE_LADDER. Over 80% taken, a step down;
- *  under 60%, a step up; between, it stays. */
+/** Mondays, Bangkok time: the note program steps on how much of last week's note money was
+ *  taken (price.mjs). Over 80% taken, a rung down; under 60%, a rung up; between, it stays. */
 export async function runNotePrice(db, now, { force = false } = {}) {
-  const s = await settings(db)
-  const day = bkkDate(now)
-  const monday = new Date(now.getTime() + 7 * 3600000).getUTCDay() === 1
-  if (!force && (!monday || s.notePricedDay === day)) return { skipped: true }
-  await setSetting(db, 'note_priced_day', day)
-  const spent = (await db.get(`SELECT COALESCE(SUM(m.satang), 0) n FROM micro_answer m JOIN micro_task t ON t.id = m.task_id
-    WHERE t.tier = 'note' AND t.gold IS NULL AND m.created_at >= ? AND m.outcome IN ('waiting', 'agreed', 'disagreed', 'unsure')`, iso(plus(now, -7 * 86400)))).n
-  const taken = s.noteCap > 0 ? spent / (7 * s.noteCap) : 0
-  const at = NOTE_LADDER.reduce((best, v, i) => Math.abs(v - s.note) < Math.abs(NOTE_LADDER[best] - s.note) ? i : best, 0)
-  const step = taken > 0.8 ? -1 : taken < 0.6 ? 1 : 0
-  const price = NOTE_LADDER[Math.max(0, Math.min(NOTE_LADDER.length - 1, at + step))]
-  await setSetting(db, 'note_satang', price)
-  return { taken: Math.round(taken * 100) / 100, from_baht: baht(s.note), baht: baht(price) }
+  const r = (await PR.stepAll(db, now, { force, only: 'note' })).note
+  if (!r) return { skipped: true }
+  return { taken: r.share, from_baht: baht(r.from), baht: baht(r.to) }
 }
 
 // ── the keeper ─────────────────────────────────────────────────────────────────

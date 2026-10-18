@@ -215,9 +215,11 @@ test('micro: the note price steps on its ladder by how much of the week was take
   assert.equal((await runNotePrice(db, monday)).baht, 10, 'nothing taken: a step up')
   assert.deepEqual(await runNotePrice(db, monday), { skipped: true }, 'once a day')
   await db.run("INSERT INTO micro_task (kind, tier, payload, source, created_at) VALUES ('note', 'note', '{}', 's', '2026-10-18')")
-  await db.run("INSERT INTO micro_answer (task_id, agent_id, payee_id, ip_hash, answer, created_at, satang, outcome) VALUES (1, 1, 1, 'x', 'yes', '2026-10-18T00:00:00.000Z', 60000, 'agreed')")
-  const r = (await admin(call, { do: 'note-price' })).body
+  await db.run("INSERT INTO micro_lease (id, task_id, agent_id, payee_id, satang, day, issued_at, expires_at, answered, tier) VALUES ('ml_x', 1, 1, 1, 60000, '2026-10-21', '2026-10-21T00:00:00Z', '2026-10-21T04:00:00Z', 1, 'note')")
+  const r = await runNotePrice(db, new Date('2026-10-26T03:00:00Z'))
   assert.ok(r.taken > 0.8 && r.baht === 5, JSON.stringify(r))
+  assert.equal((await call('GET', '/api/v1/micro')).body.tiers.find((t) => t.tier === 'note').baht, 5, 'the table sets the note price')
+  assert.equal((await admin(call, { do: 'note-price' })).status, 200, 'the keeper can force a step')
 })
 
 test('micro: a retired task opens again when it is loaded again; golds retire to the chosen mix', async () => {
