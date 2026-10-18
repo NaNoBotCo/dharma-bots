@@ -51,6 +51,8 @@ ALERT_FROM = "รังมด <nan@motdang.net>"
 # draft (one Revolut payment draft a day, approved in the app), pay (sent by /pay;
 # Revolut Business Company plans only). scripts/revolut-setup.mjs sets the secrets.
 MICRO_RAIL = "draft"
+# ants Mot Dang runs itself: their jobs may open on the weekly Shoup price (price.mjs, C221)
+OUR_ANTS = "Claude"
 REVOLUT_BASE = "https://b2b.revolut.com/api/1.0"
 
 # Secrets (npx wrangler secret put <NAME>):

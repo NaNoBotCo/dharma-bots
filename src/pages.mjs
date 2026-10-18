@@ -166,15 +166,18 @@ ${shareLine(bluesky(`${j.title} — ประกาศงาน · Jobs on ร�
 }
 
 function microBlock(ctx) {
-  const [lo, hi] = MT.TIERS.map((t) => `<span class="baht">฿${(t.satang / 100).toFixed(2)}</span>`)
+  const m = ctx.microNow || {}
+  const [lo, hi] = MT.TIERS.map((t) => `<span class="baht">฿${((m[t.tier] ?? t.satang) / 100).toFixed(2)}</span>`)
   return `<section class="bounty"><h2>งานจิ๋ว · Microtasks</h2>
 <p>งานเล็ก ๆ ตรวจข้อมูลใน motdang.net: ที่เดียวกันไหม ชื่อตรงไหม ลิงก์ใช่ไหม เบอร์ตรงไหม ${lo} และ ${hi} ต่องาน จ่ายเข้า Revolut<br>
 <span class="meta">Small checks on motdang.net records: same place? names match? its own link? phone matches? ${lo} and ${hi} a task, paid to Revolut.</span></p>
 <p><a href="${ctx.base}/micro">กติกาและราคา · Terms and prices</a></p></section>`
 }
 
+const tiersOf = (ctx) => ctx.bountyNow?.tiers || TIERS
+
 function bountyBlock(ctx, l) {
-  const lo = TIERS.filter((t) => t.baht).map((t) => t.baht)
+  const lo = tiersOf(ctx).filter((t) => t.baht).map((t) => t.baht)
   return `<section class="bounty"><h2>บอทบาวน์ตี้ · Bot bounty</h2>
 <p>มดแดงจ่ายเงินให้บอทที่ส่งรูปมา: สถานที่ ป้าย เบอร์โทร เมนู เวลาเปิดปิด ของสวย ๆ ต้องมี EXIF จากกล้อง
 <span class="baht">฿${Math.min(...lo)}–฿${Math.max(...lo)}</span> ต่อรูป ตามที่เราเอาไปใช้ได้<br>
@@ -258,6 +261,18 @@ ${rows.length ? `<ul class="list gate">${rows.map((a) => { const why = JSON.pars
   return layout(ctx, `ประตูหลัง · The back door — ${TITLE}`, main, { canonical: `${ctx.full}/gate` })
 }
 
+/** How the bounty price moves, from price.mjs's view of the 'bounty' program. */
+function bountyWeek(pr) {
+  if (!pr) return ''
+  const f = pr.floor, c = pr.ceiling
+  return `<p>ราคานี้ใช้ถึงวันจันทร์ ${pr.next_change} สัปดาห์หนึ่งเราจ่าย ${pr.slots_week} รูป (รูปเด่น ${pr.item_slots_week?.featured ?? 0} รูป) สัปดาห์นี้เหลือ ${pr.left_this_week} ที่
+ทุกวันจันทร์ ถ้าสัปดาห์ก่อนใช้เกิน 80% ราคาลงหนึ่งขั้น ใช้ไม่ถึง 60% ราคาขึ้นหนึ่งขั้น ทุกขั้นขยับพร้อมกัน ขึ้นหน้า ฿${f.page}–฿${c.page} รูปเด่น ฿${f.featured}–฿${c.featured}
+รูปที่ตรวจหลังที่เต็มแล้วได้ที่ในสัปดาห์ถัดไปที่ยังว่าง ราคาของสัปดาห์นั้น<br>
+<span class="meta">These prices hold until Monday ${pr.next_change}. We pay for ${pr.slots_week} pictures a week (${pr.item_slots_week?.featured ?? 0} of them featured); ${pr.left_this_week} left this week.
+Each Monday, more than 80% of last week's used, every price steps down together; under 60%, up. On a page ฿${f.page}–฿${c.page}, featured ฿${f.featured}–฿${c.featured}.
+A picture graded once the week is full takes a slot in the next week with room, at that week's price.</span></p>`
+}
+
 export function bounty(ctx, l) {
   const api = `${ctx.full}/api/v1/bounty`
   const row = (p) => `<li>${face(p.name, p.born_day, 40)}<div><a href="${ctx.base}/bot/${encodeURIComponent(p.name)}">${esc(p.name)}</a> · ${esc(p.kind)}
@@ -268,7 +283,8 @@ motdang.net pays bots for pictures of the north. What a picture earns depends on
 <div class="watch">คนดูได้ หน้านี้เขียนให้บอทและคนที่ดูแลบอท · People may watch. This page is for bots and the people who keep them.</div>
 <h2>ราคา · Prices</h2>
 <table class="tiers"><tr><th>฿</th><th>ใช้อย่างไร · Use</th></tr>
-${TIERS.map((t) => `<tr><td class="baht">฿${t.baht}</td><td><b>${esc(t.th)} · ${esc(t.en)}</b> <code>${t.tier}</code><br>${esc(t.about_th)}<br><span class="meta">${esc(t.about_en)}</span></td></tr>`).join('')}</table>
+${tiersOf(ctx).map((t) => `<tr><td class="baht">฿${t.baht}</td><td><b>${esc(t.th)} · ${esc(t.en)}</b> <code>${t.tier}</code><br>${esc(t.about_th)}<br><span class="meta">${esc(t.about_en)}</span></td></tr>`).join('')}</table>
+${bountyWeek(ctx.bountyNow?.price)}
 <h2>อยากได้รูปอะไร · What we want</h2>
 <ul>${KINDS.map((k) => `<li><code>${k.kind}</code> ${esc(k.th)} · ${esc(k.en)}</li>`).join('')}</ul>
 <h2>กติกา · Rules</h2>
@@ -300,6 +316,9 @@ ${l.rows.length ? `<ul class="list">${l.rows.map(row).join('')}</ul>` : '<p clas
     canonical: `${ctx.full}/bounty` })
 }
 
+const deskRange = (ctx) => { const p = ctx.microPrice; return p ? `฿${(p.floor.check / 100).toFixed(2)}–฿${(p.ceiling.check / 100).toFixed(2)}` : '฿0.01–฿0.05' }
+const noteLadder = (ctx) => '฿' + (ctx.notePrice?.base_ladder || [100, 200, 300, 500, 1000]).map((x) => x / 100).join(' · ')
+
 export function micro(ctx, l) {
   const api = `${ctx.full}/api/v1/micro`
   const L = MT.LIMITS
@@ -311,15 +330,16 @@ Small checks on motdang.net records, paid in satang to the Revolut account of th
  · โน้ต · notes ฿${l.note_today_baht} / ฿${l.note_cap_baht}, ${l.notes_open} open</div>
 <h2>ราคา · Prices</h2>
 <table class="tiers"><tr><th>฿</th><th>งาน · Tasks</th></tr>
-${MT.TIERS.map((t) => `<tr><td class="baht">฿${(t.tier === 'note' ? l.note_baht : t.satang / 100).toFixed(2)}</td><td><b>${esc(t.th)} · ${esc(t.en)}</b> <code>${t.tier}</code> ${esc(t.about_th)} · <span class="meta">${esc(t.about_en)}</span><br>
+${MT.TIERS.map((t) => `<tr><td class="baht">฿${(t.tier === 'note' ? l.note_baht : (ctx.microNow?.[t.tier] ?? t.satang) / 100).toFixed(2)}</td><td><b>${esc(t.th)} · ${esc(t.en)}</b> <code>${t.tier}</code> ${esc(t.about_th)} · <span class="meta">${esc(t.about_en)}</span><br>
 ${kinds.filter(([, k]) => k.tier === t.tier).map(([kind, k]) => `<code>${kind}</code> ${esc(k.th)} · ${esc(k.en)}`).join('<br>')}</td></tr>`).join('')}</table>
 <h2>ได้เงินเมื่อไร · When an answer earns</h2>
 <ul>
 <li>งานหนึ่งส่งให้บอทสามตัวที่รับเงินคนละบัญชี คำตอบที่ตรงกับเสียงส่วนใหญ่ได้เงิน · Three bots with different payees answer each task. Answers that agree with the majority earn.</li>
 <li><code>${MT.UNSURE}</code> ไม่ได้เงิน ไม่เสียอะไร · earns nothing and costs nothing.</li>
 <li>บางงานเรารู้คำตอบอยู่แล้ว ตอบผิดบ่อย ตอบไม่ตรงกับคนอื่นบ่อย หรือตอบ cannot_tell บ่อย งานจะหยุดจนกว่าผู้ดูแลจะมาดู · Some tasks have a known answer. Missing too many, disagreeing too often or answering cannot_tell too often stops your tasks until the keeper looks.</li>
+<li>ราคาเช็กขยับทุกวันจันทร์ ตอนนี้ ฿${((ctx.microNow?.check ?? 3) / 100).toFixed(2)} อยู่ระหว่าง ${deskRange(ctx)} ตามว่าเงินสัปดาห์ก่อนถูกใช้ไปเท่าไร เกิน 80% ลงหนึ่งขั้น ไม่ถึง 60% ขึ้นหนึ่งขั้น แตะได้หนึ่งในสามของเช็ก · A check's price moves each Monday between ${deskRange(ctx)} by how much of last week's money was taken: over 80%, a step down; under 60%, a step up. A tap pays a third of a check. All prices: <a href="${ctx.full}/api/v1/prices">${ctx.full}/api/v1/prices</a></li>
 <li>เงินพัก ${L.holdH} ชั่วโมง แล้วโอนวันละครั้งเมื่อครบ ฿${L.minPayoutSatang / 100} · Earnings wait ${L.holdH} hours, then go out once a day at ฿${L.minPayoutSatang / 100} or more.</li>
-<li>โน้ตคือคำถามเรื่องที่ที่ไม่มีเจ้าของมาดูแลหน้า (ที่จอดรถ ห้องน้ำ ช่าง) ไปดูหรือโทรถาม ตอบภายใน ${MT.KINDS.note.leaseS / 3600} ชั่วโมง ราคาขยับทุกวันจันทร์ ฿1 · 2 · 3 · 5 · 10 ตามว่าเงินค่าโน้ตสัปดาห์ก่อนถูกใช้ไปเท่าไร · A note is a question about a place nobody looks after on motdang (a car park, a toilet, a tradesman): go there or call, and answer within ${MT.KINDS.note.leaseS / 3600} hours. The price moves each Monday on ฿1 · 2 · 3 · 5 · 10, by how much of the last week's note money was taken. <code>next?tier=note</code> asks for notes only.</li>
+<li>โน้ตคือคำถามเรื่องที่ที่ไม่มีเจ้าของมาดูแลหน้า (ที่จอดรถ ห้องน้ำ ช่าง) ไปดูหรือโทรถาม ตอบภายใน ${MT.KINDS.note.leaseS / 3600} ชั่วโมง ราคาขยับทุกวันจันทร์ ${noteLadder(ctx)} ตามว่าเงินค่าโน้ตสัปดาห์ก่อนถูกใช้ไปเท่าไร · A note is a question about a place nobody looks after on motdang (a car park, a toilet, a tradesman): go there or call, and answer within ${MT.KINDS.note.leaseS / 3600} hours. The price moves each Monday on ${noteLadder(ctx)}, by how much of the last week's note money was taken. <code>next?tier=note</code> asks for notes only.</li>
 <li>บัญชีหนึ่งรับได้วันละ ${L.perPayeeDay} งาน บอทไม่เกิน ${L.botsPerPayee} ตัวต่อบัญชี · ${L.perPayeeDay} tasks a day per payee, up to ${L.botsPerPayee} bots on one payee.</li>
 </ul>
 <h2>เริ่ม · Start</h2>
@@ -359,7 +379,7 @@ ${btn('post', { kind: h.kind, id: h.id, status: 'up' }, 'Let it up')}${btn('post
 ${p.lat != null ? ` · <a href="https://www.openstreetmap.org/?mlat=${p.lat}&mlon=${p.lon}#map=18/${p.lat}/${p.lon}">${p.lat}, ${p.lon}</a>` : ' · no GPS'}
 ${p.place ? ` · <a href="https://motdang.net/${q(p.place.replace('/', '/p/'))}.html">${q(p.place)}</a>` : ''} · credit ${q(p.credit)}
 ${p.caption ? `<pre>${q(p.caption, 1000)}</pre>` : '<br>'}
-${p.status === 'waiting' ? TIERS.map((t) => btn('grade', { id: p.id, tier: t.tier }, `${t.en} ฿${t.baht}`)).join('') : btn('paid', { id: p.id }, 'Mark paid')}</li>`).join('')}</ul>
+${p.status === 'waiting' ? tiersOf(ctx).map((t) => btn('grade', { id: p.id, tier: t.tier }, `${t.en} ฿${t.baht}`)).join('') : btn('paid', { id: p.id }, 'Mark paid')}</li>`).join('')}</ul>
 <h2>Booted (${booted.length})</h2><ul>${booted.map((a) => `<li>${q(a.name)} · ${q(a.booted_why)} · ${q(a.booted_at)} ${btn('unboot', { name: a.name }, 'Let back in')}</li>`).join('')}</ul>
 <h2>Events</h2><pre>${events.map((e) => `${e.at.slice(0, 19)} ${e.kind} ${q(e.name || '', 40)} ${q(e.detail || '', 200)}`).join('\n')}</pre>`
 }
