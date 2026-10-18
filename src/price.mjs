@@ -100,7 +100,9 @@ export async function view(db, program, now) {
   const out = {
     program, unit: p.unit, base_item: p.base_item, amounts: amounts(p), ratios: Object.fromEntries(p.items.map((i) => [i.item, i.ratio])),
     floor: amounts(p, p.floor_rung), ceiling: amounts(p, p.ceiling_rung), base_ladder: p.ladder.slice(p.floor_rung, p.ceiling_rung + 1),
-    measure: p.measure, step: p.step, week, next_change: p.step === 'weekly' ? addDays(week, 7) : null,
+    measure: p.measure, step: p.step, week,
+    // the first Monday after the opening week, then every Monday
+    next_change: p.step === 'weekly' ? addDays(week > p.opened ? week : p.opened, 7) : null,
   }
   if (p.measure === 'slots') {
     const used = await usedSlots(db, program, week)

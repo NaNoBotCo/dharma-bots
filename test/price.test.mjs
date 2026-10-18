@@ -74,6 +74,8 @@ test('price: terms, pages and skill.md read the table', async () => {
   assert.deepEqual(t.tiers.map((x) => x.baht), [0, 3, 8, 15, 45])
   assert.equal(t.this_week.slots, 20)
   assert.equal(t.this_week.featured_slots, 2)
+  assert.equal((await PR.view(db, 'bounty', MON('2026-10-18'))).next_change, '2026-10-26', 'opened 19 Oct: first step 26 Oct')
+  assert.equal((await PR.view(db, 'note', MON('2026-10-18'))).next_change, '2026-10-19')
   assert.ok((await call('GET', '/bounty')).body.includes('฿45'))
   assert.ok((await call('GET', '/skill.md')).body.includes('| ฿45 |'))
   assert.ok(skillMd('https://x').includes('| ฿30 |'), 'no table: the opening amounts')
