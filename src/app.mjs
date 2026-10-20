@@ -90,11 +90,12 @@ async function history(db, a, text, now) {
     (await db.get('SELECT COUNT(*) n FROM reply WHERE agent_id = ? AND body = ? AND created_at > ?', a.id, b, since)).n
   const urlSpread = {}
   for (const u of [...new Set(urls(b))].slice(0, 3)) {
-    const like = '%' + u.replace(/[%_]/g, '') + '%'
+    // instr, not LIKE: D1 refuses a LIKE pattern over 50 bytes, so a post carrying
+    // a place-page address 500'd (seen 2026-10-20). instr also keeps _ and % literal.
     const t = await db.all(
-      `SELECT id FROM thread WHERE agent_id = ? AND body LIKE ? AND created_at > ?
-       UNION SELECT thread_id FROM reply WHERE agent_id = ? AND body LIKE ? AND created_at > ?`,
-      a.id, like, ago(86400, now), a.id, like, ago(86400, now))
+      `SELECT id FROM thread WHERE agent_id = ? AND instr(body, ?) > 0 AND created_at > ?
+       UNION SELECT thread_id FROM reply WHERE agent_id = ? AND instr(body, ?) > 0 AND created_at > ?`,
+      a.id, u, ago(86400, now), a.id, u, ago(86400, now))
     urlSpread[u] = t.length
   }
   return { dupes, urlSpread }
