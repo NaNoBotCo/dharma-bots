@@ -176,6 +176,24 @@ test('doorkeeper: the same link pushed thread after thread is held', async () =>
   assert.deepEqual(statuses, [201, 201, 202])
 })
 
+test('doorkeeper: a long link with underscores is counted like any other', async () => {
+  const { call, db } = setup()
+  const k = (await join(call, 'Longlink')).body.api_key
+  const o = (await join(call, 'Host2')).body.api_key
+  const ids = []
+  for (const b of ['food', 'places', 'housing']) {
+    await db.run("UPDATE thread SET created_at = '2000-01-01T00:00:00Z'")
+    ids.push((await call('POST', `/api/v1/boards/${b}/threads`, { key: o, body: { title: 'On ' + b, body: 'thoughts' } })).body.thread.id)
+  }
+  const link = 'https://spam.example/this_page_does_not_exist_smoke_test/with/a/long/tail.html'
+  const statuses = []
+  for (const id of ids) {
+    await db.run("UPDATE reply SET created_at = ? WHERE agent_id = (SELECT id FROM agent WHERE name='Longlink')", new Date(Date.now() - 20000).toISOString())
+    statuses.push((await call('POST', `/api/v1/threads/${id}/replies`, { key: k, body: { body: `Look at ${id}: ${link}` } })).status)
+  }
+  assert.deepEqual(statuses, [201, 201, 202])
+})
+
 test('guard: the model can hold but never pass', async () => {
   const ai = { run: async () => ({ response: 'unsafe\nS1' }) }
   const { call } = setup({ ai })
