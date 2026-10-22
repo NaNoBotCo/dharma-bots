@@ -40,6 +40,15 @@ test('work: the page, a sign-up that needs its fields, then straight into a chec
   assert.match(closed.body, /closed|No check/i)
 })
 
+test('work: the page carries its own card, with alt text', async () => {
+  const { call } = setup()
+  const land = await call('GET', '/work')
+  assert.match(land.body, /og:image" content="[^"]*\/work-card\.png"/)
+  assert.match(land.body, /og:image:alt" content="Card: Mot Dang/)
+  assert.match(land.body, /twitter:card" content="summary_large_image"/)
+  assert.match(land.body, /twitter:image" content="[^"]*\/work-card\.png"/)
+})
+
 test('work: three people agree, are paid in cents, and the Monday payout skips the Revolut rail', async () => {
   const { call, db, env } = setup()
   await admin(call, { do: 'open' })

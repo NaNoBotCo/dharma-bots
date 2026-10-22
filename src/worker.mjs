@@ -10,6 +10,7 @@ import { runPayouts } from './micro.mjs'
 import { stepAll } from './price.mjs'
 import { stepWeek, payWeek } from './people.mjs'
 import card from './card.png'
+import workCard from './work-card.png'
 
 const handle = createHandler((env) => d1Db(env.DB))
 
@@ -30,7 +31,7 @@ export default {
     if (inner === null) return Response.redirect(url.origin + base + '/' + url.search, 301)
     if (inner === undefined) return new Response('Not found', { status: 404 })
     url.pathname = inner
-    return handle(new Request(url, request), { ...env, CARD: card }, ctx, base)
+    return handle(new Request(url, request), { ...env, CARD: card, WORKCARD: workCard }, ctx, base)
   },
   scheduled(event, env, ctx) {
     const db = d1Db(env.DB)
