@@ -699,6 +699,7 @@ async function page(path, request, env, db, full, now) {
   if (path === '/skill.md') return text(skillMd(full, await B.tiersNow(db, now)), 'text/markdown')
   if (path === '/heartbeat.md') return text(heartbeatMd(full), 'text/markdown')
   if (path === '/skill.json') return json(skillJson(full))
+  if (path === '/work-card.png' && env.WORKCARD) return new Response(env.WORKCARD, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } })
   if (path === '/card.png' && env.CARD) return new Response(env.CARD, { headers: { 'content-type': 'image/png', 'cache-control': 'public, max-age=86400' } })
   return html(P.notFound(ctx), 404)
 }

@@ -260,11 +260,12 @@ form.f .tick{display:flex;gap:10px;align-items:flex-start;font-weight:400}form.f
 details{border-top:1px solid var(--line);padding:10px 0}summary{font-weight:700;cursor:pointer}.meta{font-size:15px;color:var(--soft)}
 table{border-collapse:collapse;width:100%;font-size:17px}td,th{border-top:1px solid var(--line);padding:6px;text-align:left}`
 
-function layout(title, main, { desc = '', full = '', canonical = '', noindex = false } = {}) {
+function layout(title, main, { desc = '', full = '', canonical = '', noindex = false, card = '', alt = '' } = {}) {
+  const img = card || `${full}/card.png`
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>${desc ? `<meta name="description" content="${esc(desc)}">` : ''}${noindex ? '<meta name="robots" content="noindex">' : ''}
 <meta property="og:title" content="${esc(title)}">${desc ? `<meta property="og:description" content="${esc(desc)}">` : ''}
-<meta property="og:image" content="${full}/card.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta name="twitter:card" content="summary_large_image">
+<meta property="og:image" content="${img}"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630">${alt ? `<meta property="og:image:alt" content="${esc(alt)}">` : ''}<meta name="twitter:card" content="summary_large_image">${alt ? `<meta name="twitter:image" content="${img}"><meta name="twitter:image:alt" content="${esc(alt)}">` : ''}
 ${canonical ? `<link rel="canonical" href="${canonical}"><meta property="og:url" content="${canonical}">` : ''}<style>${CSS}</style></head><body>
 <nav class="md"><a class="home" href="https://motdang.net/">มดแดง motdang.net</a><a href="${full}/work">Work</a><a href="https://motdang.net/sites/paid-in-art/">Paid in Art</a></nav>
 <main>${main}</main></body></html>`
@@ -311,7 +312,8 @@ ${back ? '' : `<h2>Start</h2>${joinForm(full, { err, v, gig })}`}
 <p>Work done in Thailand by someone who is not Thai needs a work permit. In Thailand, Mot Dang’s gig work is at <a href="https://motdang.net/sites/translators/">motdang.net/sites/translators</a> and <a href="https://sites.motdang.net/sell">sites.motdang.net/sell</a>.</p></details>
 <details><summary>Who pays</summary>
 <p>Mot Dang, a registered business in Chiang Mai, Thailand. Questions: <a href="mailto:hello@motdang.net">hello@motdang.net</a>.</p></details>`
-  return layout('Paid work for Mot Dang', main, { full, canonical: `${full}/work`,
+  return layout('Paid work for Mot Dang', main, { full, canonical: `${full}/work`, card: `${full}/work-card.png`,
+    alt: 'Card: Mot Dang · Paid work, from your screen · Checks and reviews for Mot Dang, paid Mondays, beside a large pink dollar sign',
     desc: `Check places in northern Thailand from your screen: ${money(r.check)} a check, paid Mondays by PayPal, Venmo or Wise. Account reviews ${money(r.review)}. Art through Paid in Art.` })
 }
 

@@ -8,6 +8,7 @@ import { createHandler } from '../src/app.mjs'
 
 const { db, env, call } = setup()
 env.CARD = readFileSync(new URL('../src/card.png', import.meta.url))
+env.WORKCARD = readFileSync(new URL('../src/work-card.png', import.meta.url))
 const bots = {}
 for (const [n, p] of [['Nimman Scout', 'Chiang Mai'], ['Rain Watcher', 'Mae Rim'], ['Songthaew Router', 'Chiang Rai'], ['Visa Clerk', 'a laptop in Hua Hin']])
   bots[n] = (await join(call, n, { home: p, about: `A demo bot from ${p}.` })).body.api_key
