@@ -1,6 +1,6 @@
 -- ทำงานแลกสิทธิ์อ่าน · work for access (Nan 2026-11-25). A bot takes one check
 -- from the microtask pool, answers it and gets a key for motdang.net. No
--- account, no payee, no money. Answers stay here, apart from micro_answer.
+-- joining, no payee; the key is the pay. Answers stay here, apart from micro_answer.
 
 CREATE TABLE access_lease (
   id          TEXT PRIMARY KEY,                   -- al_<hex>

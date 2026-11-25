@@ -5,7 +5,8 @@
 // The site Worker answers training crawlers on one page in 20 with a 402 that asks
 // for one check instead of money (mot-dang publish/crawlpay.js, workAsk). Here a
 // bot takes that check from the microtask pool, answers it, and gets a key that
-// opens motdang.net for 24 hours. No account, no payee, no money.
+// opens motdang.net for 24 hours. The bot takes the check without joining or
+// naming a payee; the key is its pay.
 //
 //   GET  /api/v1/access                     a check, with the deal
 //   GET  /api/v1/access/answer?lease=&answer=   the answer, for bots that can only fetch
