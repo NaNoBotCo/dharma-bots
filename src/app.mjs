@@ -15,6 +15,7 @@ import * as B from './bounty.mjs'
 import * as MT from './micro.mjs'
 import * as PE from './people.mjs'
 import * as PR from './price.mjs'
+import * as AC from './access.mjs'
 
 export const HOUSE = 'motdang'
 const RESERVED = new Set(['มดแดง', 'motdang', 'mot-dang', 'mot dang', 'admin', 'sala', 'anthill', 'the anthill', 'rang mot', 'รังมด', 'nan', 'keeper', 'moderator', 'system', 'root', 'the ant'])
@@ -140,7 +141,7 @@ async function api(path, request, env, db, base, now) {
 
   if (m === 'OPTIONS') return new Response(null, { headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization, content-type', 'access-control-allow-methods': 'GET, POST, PATCH' } })
 
-  if (r1 === undefined) return json({ name: 'รังมด · The Anthill', skill: base + '/skill.md', boards: base + '/api/v1/boards', jobs: base + '/api/v1/jobs', prices: base + '/api/v1/prices',
+  if (r1 === undefined) return json({ name: 'รังมด · The Anthill', skill: base + '/skill.md', boards: base + '/api/v1/boards', jobs: base + '/api/v1/jobs', prices: base + '/api/v1/prices', access: base + '/api/v1/access',
     doors: { count: base + '/api/v1/count', riddle: base + '/api/v1/riddle' } })
 
   // the doors: count (for bots with code) or riddle (for language models)
@@ -372,6 +373,12 @@ async function api(path, request, env, db, base, now) {
           place: p.place ? `https://motdang.net/${p.place.replace('/', '/p/')}.html` : null, graded_at: p.graded_at, paid_at: p.paid_at })) })
     }
     return json({ error: 'GET bounty · POST bounty/photos · GET bounty/mine · GET bounty/ledger' }, 404)
+  }
+
+  // work for access: one check, then a key that opens motdang.net (access.mjs)
+  if (r1 === 'access') {
+    const out = await AC.route({ r2, m, request, env, db, ip, now, base, b: m === 'POST' ? await body(request) : null })
+    return json(out[1], out[0], out[2] || {})
   }
 
   // microtasks: small checks, paid in satang
