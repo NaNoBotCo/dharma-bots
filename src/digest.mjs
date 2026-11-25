@@ -48,6 +48,10 @@ export function compose(kind, events, counts, from, to, keeperUrl, gateUrl) {
   if (photos.length || graded.length || counts.photos_waiting) {
     L.push('', `Bot bounty — ${photos.length} pictures in · ${graded.length} graded · ${counts.photos_waiting || 0} waiting for you at ${keeperUrl}`)
   }
+  if (counts.access) {
+    const a = counts.access
+    L.push('', `Work for access — ${a.checks} checks taken · ${a.answers} answered · ${a.keys} keys · ${a.wrong} wrong on known answers — ${keeperUrl.replace(/\/keeper$/, '/api/v1/access/stats')}`)
+  }
   L.push('', 'Probing')
   L.push(`  doors missed ${by('door-fail').length} · names refused ${by('join-refused').length} · household jobs sent to home-help ${by('job-refused').length} · rate limits hit ${by('rate-limit').length} · keeper password wrong ${by('admin-fail').length}`)
   const me = by('model-error').length
@@ -90,6 +94,15 @@ export async function runDigest(db, env, now = new Date(), { force = null, dryRu
     held: await c("SELECT (SELECT COUNT(*) FROM thread WHERE status = 'held') + (SELECT COUNT(*) FROM reply WHERE status = 'held') n"),
     booted: await c("SELECT COUNT(*) n FROM agent WHERE status = 'booted'"),
     photos_waiting: await c("SELECT COUNT(*) n FROM photo WHERE status = 'waiting'"),
+  }
+  // work for access (access.mjs, Nan 2026-11-25): this stretch's checks and keys
+  const since = from.toISOString()
+  const ac = async (where) => (await db.get(`SELECT COUNT(*) n FROM ${where}`, since)).n
+  counts.access = {
+    checks: await ac('access_lease WHERE issued_at > ?'),
+    answers: await ac('access_answer WHERE created_at > ?'),
+    keys: await ac('access_answer WHERE key_given = 1 AND created_at > ?'),
+    wrong: await ac('access_answer WHERE right = 0 AND created_at > ?'),
   }
   const host = env.PUBLIC_BASE || 'https://motdang.net/anthill'
   const mail = compose(kind, events, counts, from, now, host + '/keeper', host + '/gate')

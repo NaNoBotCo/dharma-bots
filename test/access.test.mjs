@@ -2,6 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { setup } from './helpers.mjs'
 import { makeKey, checkKey, ACCESS } from '../src/access.mjs'
+import { runDigest } from '../src/digest.mjs'
 
 const now = () => new Date().toISOString()
 async function task(db, kind, gold = null, n = 1) {
@@ -90,4 +91,15 @@ test('access: keys — tampered, expired and too far ahead are refused', async (
   assert.equal(await checkKey('s', null, t), 0)
   // the vector crawlpay.js's test checks too, so the two copies stay in step
   assert.equal(await makeKey('vector-secret', 1_800_000_000), 'ak1.tro8w0.ZtpGexWmge1V0KBtpnKuma')
+})
+
+test('access: the daily digest counts checks and keys for the stretch', async () => {
+  const { db, env, call } = setup()
+  env.ACCESS_SECRET = 's'
+  await task(db, 'name-match', null, 2)
+  const t = (await call('GET', '/api/v1/access', from('5.5.5.5'))).body.task
+  await age(db, t.lease)
+  await call('GET', `/api/v1/access/answer?lease=${t.lease}&answer=no`, from('5.5.5.5'))
+  const d = await runDigest(db, env, new Date(), { force: 'daily', dryRun: true })
+  assert.match(d.text, /Work for access — 1 checks taken · 1 answered · 1 keys · 0 wrong on known answers — https:\/\/motdang.net\/anthill\/api\/v1\/access\/stats/)
 })
